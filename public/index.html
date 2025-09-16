@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Cashout Ticket Printer</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        margin-top: 20px;
+      }
+      form {
+        max-width: 400px;
+        margin: auto;
+        text-align: left;
+      }
+      label {
+        display: block;
+        margin-top: 10px;
+        font-weight: bold;
+      }
+      input {
+        width: 100%;
+        padding: 8px;
+        margin-top: 4px;
+      }
+      button {
+        margin-top: 20px;
+        font-size: 18px;
+        padding: 12px;
+        background: #4caf50;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #45a049;
+      }
+
+      /* Ticket preview */
+      .preview-container {
+        margin: 40px auto;
+        width: 600px; /* wide like landscape */
+        height: 250px; /* short like landscape */
+        border: 2px solid #333;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: #fff;
+      }
+      .ticket {
+        width: 100%;
+        height: 100%;
+        padding: 20px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .ticket h2 {
+        margin: 0;
+        font-size: 24px;
+      }
+      .ticket p {
+        margin: 6px 0;
+        font-size: 14px;
+      }
+      .barcode {
+        margin: 10px auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Cashout Ticket Printer</h1>
+
+    <form id="ticketForm">
+      <label>Voucher Type</label>
+      <input type="text" name="voucherType" value="CASHOUT TICKET" />
+
+      <label>Validation Code</label>
+      <input type="text" name="validation" value="010000000000000001" />
+
+      <label>Ticket Number</label>
+      <input type="text" name="ticketNo" value="0004" />
+
+      <label>Date</label>
+      <input type="text" name="validDate" value="01.11.2016" />
+
+      <label>Time</label>
+      <input type="text" name="time" value="10:15:14" />
+
+      <label>Amount (EUR)</label>
+      <input type="text" name="amount" value="919.85" />
+
+      <button type="submit">🖨️ Print Ticket</button>
+    </form>
+
+    <!-- Preview -->
+    <h2>Ticket Preview</h2>
+    <div class="preview-container">
+      <div class="ticket" id="ticketPreview">
+        <h2 id="previewVoucher">CASHOUT TICKET</h2>
+        <p id="previewDate">Valid Date: 01.11.2016</p>
+        <p id="previewAmount">Amount: 919.85 PHP</p>
+        <svg id="barcode" class="barcode"></svg>
+        <p id="previewFooter">Ticket #0004 Time: 10:15:14</p>
+        <p>---- THANK YOU ----</p>
+      </div>
+    </div>
+
+    <!-- JsBarcode for barcode rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    <script>
+      const form = document.getElementById("ticketForm");
+
+      function updatePreview() {
+        const data = Object.fromEntries(new FormData(form).entries());
+
+        document.getElementById("previewVoucher").innerText =
+          data.voucherType || "";
+        document.getElementById("previewDate").innerText =
+          "Valid Date: " + (data.validDate || "");
+        document.getElementById("previewAmount").innerText =
+          "Amount: " + (data.amount || "") + " PHP";
+        document.getElementById("previewFooter").innerText =
+          "Ticket #" + (data.ticketNo || "") + "   Time: " + (data.time || "");
+
+        // Render barcode
+        JsBarcode("#barcode", data.validation || "", {
+          format: "CODE128",
+          lineColor: "#000",
+          width: 2,
+          height: 40,
+          displayValue: true,
+        });
+      }
+
+      // Update preview live
+      form.addEventListener("input", updatePreview);
+      updatePreview();
+
+      // Submit form to print
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(form).entries());
+
+        const res = await fetch("/print", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+
+        const result = await res.json();
+        alert(result.message);
+      });
+    </script>
+  </body>
+</html>

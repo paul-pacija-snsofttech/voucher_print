@@ -34,10 +34,103 @@ try {
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, "public")));
 
+// function for converting number to pesos
+function numberToPesos(num) {
+  if (typeof num !== "number") num = parseFloat(num);
+  if (isNaN(num)) return "Invalid amount";
+
+  const ones = [
+    "",
+    "ONE",
+    "TWO",
+    "THREE",
+    "FOUR",
+    "FIVE",
+    "SIX",
+    "SEVEN",
+    "EIGHT",
+    "NINE",
+    "TEN",
+    "ELEVEN",
+    "TWELVE",
+    "thirteen",
+    "FOURTEEN",
+    "FIFTEEN",
+    "SIXTEEN",
+    "SEVENTEEN",
+    "EIGHTEEN",
+    "NINETEEN",
+  ];
+  const tens = [
+    "",
+    "",
+    "TWENTY",
+    "THIRTY",
+    "FORTY",
+    "FIFTY",
+    "SIXTY",
+    "SEVENTY",
+    "EIGHTY",
+    "NINETY",
+  ];
+  const scales = ["", "THOUSAND", "MILLION", "BILLION"];
+
+  function inWords(n) {
+    if (n === 0) return "ZERO";
+    let words = "";
+
+    let scaleIdx = 0;
+    while (n > 0) {
+      let chunk = n % 1000;
+      if (chunk) {
+        let chunkWords = "";
+        let hundreds = Math.floor(chunk / 100);
+        let remainder = chunk % 100;
+
+        if (hundreds) {
+          chunkWords += ones[hundreds] + " HUNDRED";
+          if (remainder) chunkWords += " ";
+        }
+        if (remainder < 20) {
+          chunkWords += ones[remainder];
+        } else {
+          let t = Math.floor(remainder / 10);
+          let o = remainder % 10;
+          chunkWords += tens[t];
+          if (o) chunkWords += "-" + ones[o];
+        }
+
+        words =
+          chunkWords + " " + scales[scaleIdx] + (words ? " " + words : "");
+      }
+      n = Math.floor(n / 1000);
+      scaleIdx++;
+    }
+
+    return words.trim();
+  }
+
+  const pesos = Math.floor(num);
+  const centavos = Math.round((num - pesos) * 100);
+
+  let result = inWords(pesos) + " PESO" + (pesos === 1 ? "" : "S");
+  if (centavos > 0) {
+    result +=
+      " AND " + inWords(centavos) + " CENTAVO" + (centavos === 1 ? "" : "S");
+  } else {
+    result += " AND NO CENTAVO";
+  }
+
+  return result.charAt(0).toUpperCase() + result.slice(1);
+}
+
 /**
  * Build ticket with landscape + barcode
  */
 function buildTicket({
+  location,
+  assetId,
+  floorLocation,
   voucherType,
   validDate,
   amount,
@@ -58,12 +151,15 @@ function buildTicket({
   // --- Base setup ---
   const reset = Buffer.from([0x1b, 0x2a]); // Reset
   const landscape = Buffer.from([0x1d, 0x56, 0x01]); // Landscape
-  const fontNormal = Buffer.from([0x1b, 0x46, 12, 12, 0]); // 12pt normal
-  const fontLarge = Buffer.from([0x1b, 0x46, 18, 12, 1]); // 18pt bold
+  const portrait = Buffer.from([0x1d, 0x56, 0x00]); // Portrait
+  const fontNormal = Buffer.from([0x1b, 0x46, 12, 12, 0]); // 10pt normal
+  const fontSmall = Buffer.from([0x1b, 0x46, 8, 8, 0]); // 8pt normal
+  const fontLargeBold = Buffer.from([0x1b, 0x46, 24, 24, 1]); // 24pt bold
+  const fontThin = Buffer.from([0x1b, 0x46, 10, 10, 0]); // arial
 
   // --- Barcode (Code128-B) ---
   const barcode = Buffer.concat([
-    Buffer.from([0x1d, 0x68, 80]), // Height
+    Buffer.from([0x1d, 0x68, 200]), // Height
     Buffer.from([0x1d, 0x77, 6]), // Width
     Buffer.from([0x1d, 0x6b, 0x09, validation.length]), // GS k n=9 (Code128-B), m=length
     Buffer.from(validation, "ascii"),
@@ -75,39 +171,53 @@ function buildTicket({
     landscape,
 
     escX(300),
-    escY(0),
-    fontLarge,
+    escY(10),
+    fontLargeBold,
     Buffer.from(`${voucherType}\n`, "ascii"),
 
-    escX(320),
-    escY(10),
-    fontNormal,
-    Buffer.from(`Valid Date: ${validDate}\n`, "ascii"),
-
-    escX(320),
-    escY(15),
-    fontNormal,
-    Buffer.from(`Amount: ${amount}PHP\n`, "ascii"),
-
-    escX(250),
-    escY(25),
+    escX(235),
+    escY(17),
     barcode,
     Buffer.from("\n", "ascii"),
 
-    escX(320),
-    escY(35),
-    Buffer.from(validation, "ascii"),
-    Buffer.from("\n", "ascii"),
-
-    escX(280),
+    escX(240),
     escY(45),
     fontNormal,
-    Buffer.from(`Ticket #${ticketNo}  Time: ${time}\n`, "ascii"),
+    Buffer.from(`VALIDATION   ${validation}\n`, "ascii"),
 
-    escX(320),
+    escX(280),
+    escY(47),
+    fontThin,
+    Buffer.from(`${numberToPesos(amount)}\n`, "ascii"),
+
+    escX(350),
     escY(50),
+    fontLargeBold,
+    Buffer.from(`PHP${amount}\n`, "ascii"),
+
+    escX(0),
+    escY(45),
     fontNormal,
-    Buffer.from("---- THANK YOU ----\n", "ascii"),
+    Buffer.from(`${validDate}\n`, "ascii"),
+
+    escX(0),
+    escY(50),
+    fontThin,
+    Buffer.from(`ASSET# ${assetId}    Ticket# ${ticketNo}\n`, "ascii"),
+
+    escX(860),
+    escY(45),
+    fontNormal,
+    Buffer.from(`${time}\n`, "ascii"),
+
+    escX(860),
+    escY(50),
+    fontThin,
+    Buffer.from(`Never Expires\n`, "ascii"),
+
+    portrait,
+    fontNormal,
+    Buffer.from(`${validation}\n`, "ascii"),
 
     Buffer.from([0x0c]), // Form feed
   ]);
@@ -121,10 +231,22 @@ app.post("/print", (req, res) => {
       .json({ success: false, message: "Printer not connected" });
   }
 
-  const { voucherType, validDate, amount, validation, ticketNo, time } =
-    req.body;
+  const {
+    location,
+    assetId,
+    floorLocation,
+    voucherType,
+    validDate,
+    amount,
+    validation,
+    ticketNo,
+    time,
+  } = req.body;
 
   const data = buildTicket({
+    location: location || "CASINO PLUS QA",
+    assetId: assetId || "A1234",
+    floorLocation: floorLocation || "Ground Floor",
     voucherType: voucherType || "CASHOUT TICKET",
     validDate: validDate || "01.01.2025",
     amount: amount || "0.00",

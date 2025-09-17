@@ -42,7 +42,7 @@
       .preview-container {
         margin: 40px auto;
         width: 600px; /* wide like landscape */
-        height: 250px; /* short like landscape */
+        height: 280px; /* taller to fit all info */
         border: 2px solid #333;
         display: flex;
         justify-content: center;
@@ -75,8 +75,17 @@
     <h1>Cashout Ticket Printer</h1>
 
     <form id="ticketForm">
+      <label>Location</label>
+      <input type="text" name="location" value="CASHOUT TICKET" />
+
+      <label>Asset ID</label>
+      <input type="text" name="assetId" value="A1234" />
+
+      <label>Floor Location</label>
+      <input type="text" name="floorLocation" value="Ground Floor" />
+
       <label>Voucher Type</label>
-      <input type="text" name="voucherType" value="CASHOUT TICKET" />
+      <input type="text" name="voucherType" value="Cash Voucher" />
 
       <label>Validation Code</label>
       <input type="text" name="validation" value="010000000000000001" />
@@ -90,8 +99,8 @@
       <label>Time</label>
       <input type="text" name="time" value="10:15:14" />
 
-      <label>Amount (EUR)</label>
-      <input type="text" name="amount" value="919.85" />
+      <label>Amount (PHP)</label>
+      <input type="text" name="amount" value="1000" />
 
       <button type="submit">🖨️ Print Ticket</button>
     </form>
@@ -100,31 +109,124 @@
     <h2>Ticket Preview</h2>
     <div class="preview-container">
       <div class="ticket" id="ticketPreview">
-        <h2 id="previewVoucher">CASHOUT TICKET</h2>
-        <p id="previewDate">Valid Date: 01.11.2016</p>
-        <p id="previewAmount">Amount: 919.85 PHP</p>
+        <h2 id="previewLocation">CASHOUT TICKET</h2>
+        <p id="previewAsset">Asset ID: A1234 | Floor: Ground Floor</p>
+        <h3 id="previewVoucher">Cash Voucher</h3>
         <svg id="barcode" class="barcode"></svg>
-        <p id="previewFooter">Ticket #0004 Time: 10:15:14</p>
-        <p>---- THANK YOU ----</p>
+        <p id="previewDetails">
+          01.11.2016 | VALIDATION: 010000000000000001 | Ticket #0004 | Time:
+          10:15:14
+        </p>
+        <p id="previewWords">One thousand pesos and no centavos</p>
+        <h2 id="previewAmount">PHP 1000</h2>
       </div>
     </div>
 
     <!-- JsBarcode for barcode rendering -->
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     <script>
+      // Peso converter (simplified for frontend)
+      function numberToPesos(num) {
+        num = parseFloat(num);
+        if (isNaN(num)) return "";
+        const ones = [
+          "",
+          "one",
+          "two",
+          "three",
+          "four",
+          "five",
+          "six",
+          "seven",
+          "eight",
+          "nine",
+          "ten",
+          "eleven",
+          "twelve",
+          "thirteen",
+          "fourteen",
+          "fifteen",
+          "sixteen",
+          "seventeen",
+          "eighteen",
+          "nineteen",
+        ];
+        const tens = [
+          "",
+          "",
+          "twenty",
+          "thirty",
+          "forty",
+          "fifty",
+          "sixty",
+          "seventy",
+          "eighty",
+          "ninety",
+        ];
+        function inWords(n) {
+          if (n === 0) return "zero";
+          let words = "";
+          if (n < 20) return ones[n];
+          if (n < 100)
+            return (
+              tens[Math.floor(n / 10)] + (n % 10 ? "-" + ones[n % 10] : "")
+            );
+          if (n < 1000)
+            return (
+              ones[Math.floor(n / 100)] +
+              " hundred" +
+              (n % 100 ? " " + inWords(n % 100) : "")
+            );
+          if (n < 1000000)
+            return (
+              inWords(Math.floor(n / 1000)) +
+              " thousand" +
+              (n % 1000 ? " " + inWords(n % 1000) : "")
+            );
+          return n;
+        }
+        const pesos = Math.floor(num);
+        const centavos = Math.round((num - pesos) * 100);
+        let result = inWords(pesos) + " peso" + (pesos === 1 ? "" : "s");
+        if (centavos > 0) {
+          result +=
+            " and " +
+            inWords(centavos) +
+            " centavo" +
+            (centavos === 1 ? "" : "s");
+        } else {
+          result += " and no centavos";
+        }
+        return result.charAt(0).toUpperCase() + result.slice(1);
+      }
+
       const form = document.getElementById("ticketForm");
 
       function updatePreview() {
         const data = Object.fromEntries(new FormData(form).entries());
 
+        document.getElementById("previewLocation").innerText =
+          data.location || "";
+        document.getElementById("previewAsset").innerText =
+          "Asset ID: " +
+          (data.assetId || "") +
+          " | Floor: " +
+          (data.floorLocation || "");
         document.getElementById("previewVoucher").innerText =
           data.voucherType || "";
-        document.getElementById("previewDate").innerText =
-          "Valid Date: " + (data.validDate || "");
+        document.getElementById("previewDetails").innerText =
+          (data.validDate || "") +
+          " | VALIDATION: " +
+          (data.validation || "") +
+          " | Ticket #" +
+          (data.ticketNo || "") +
+          " | Time: " +
+          (data.time || "");
+        document.getElementById("previewWords").innerText = numberToPesos(
+          data.amount || 0
+        );
         document.getElementById("previewAmount").innerText =
-          "Amount: " + (data.amount || "") + " PHP";
-        document.getElementById("previewFooter").innerText =
-          "Ticket #" + (data.ticketNo || "") + "   Time: " + (data.time || "");
+          "PHP " + (data.amount || "");
 
         // Render barcode
         JsBarcode("#barcode", data.validation || "", {
@@ -136,11 +238,9 @@
         });
       }
 
-      // Update preview live
       form.addEventListener("input", updatePreview);
       updatePreview();
 
-      // Submit form to print
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(form).entries());

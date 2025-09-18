@@ -149,9 +149,42 @@ function buildTicket({
   }
 
   // NEW: center helper (ESC mode doesn’t have CENTER)
-  const center = Buffer.from([0x1b, 0x61, 1]); // ESC a 1 = center
-  const left = Buffer.from([0x1b, 0x61, 0]); // ESC a 0 = left
-  const right = Buffer.from([0x1b, 0x61, 2]); // ESC a 2 = right
+  function centerX(text, fontWidthDots = 12, pageWidthDots = 980) {
+    // total width of text in dots
+    const textWidth = text.length * fontWidthDots;
+
+    // position so that text is centered
+    const pos = Math.max(0, Math.floor((pageWidthDots - textWidth) / 2));
+
+    const n1 = Math.floor(pos / 256);
+    const n2 = pos % 256;
+
+    console.log(n1, n2);
+
+    return Buffer.from([0x1b, 0x58, n1, n2]); // ESC X
+  }
+
+  // Right alignment (align so text ends at right margin)
+  function rightX(text, fontWidthDots = 12, pageWidthDots = 1000, margin = 50) {
+    const textWidth = text.length * fontWidthDots;
+    const pos = Math.max(0, pageWidthDots - textWidth - margin);
+    const n1 = Math.floor(pos / 256);
+    const n2 = pos % 256;
+    return Buffer.from([0x1b, 0x58, n1, n2]); // ESC X
+  }
+
+  function centerBarcode(data, moduleWidth = 6, pageWidthDots = 1000) {
+    const dataLength = data.length;
+
+    // Empirical formula based on Epic Edge behavior
+    const modulesPerChar = 6.2; // instead of 11
+
+    const totalModules = Math.round(dataLength * modulesPerChar);
+    const barcodeWidth = totalModules * moduleWidth;
+
+    const pos = Math.floor((pageWidthDots - barcodeWidth) / 2);
+    return escX(pos);
+  }
 
   // --- Base setup ---
   const reset = Buffer.from([0x1b, 0x2a]); // Reset
@@ -165,7 +198,7 @@ function buildTicket({
 
   // --- Barcode (Code128-B) ---
   const barcode = Buffer.concat([
-    Buffer.from([0x1d, 0x68, 200]), // Height
+    Buffer.from([0x1d, 0x68, 210]), // Height
     Buffer.from([0x1d, 0x77, 6]), // Width
     Buffer.from([0x1d, 0x6b, 0x09, cleanValidation.length]),
     Buffer.from(cleanValidation, "ascii"),
@@ -177,59 +210,100 @@ function buildTicket({
     landscape,
 
     // VoucherType centered
-    center, // assumes 24-dot font width
+    centerX(voucherType, 24, 950),
     escY(5),
     fontLargeBold,
     Buffer.from(`${voucherType}\n`, "ascii"),
 
     // Barcode centered
-    center, // approximate center
+    centerBarcode(cleanValidation, 4),
     escY(12),
     barcode,
     Buffer.from("\n", "ascii"),
 
-    // Validation line centered
-    center,
-    escY(37),
+    // Validation centered
+    centerX(`VALIDATION ${validation}`, 12),
+    escY(40),
     fontNormal,
-    Buffer.from(`VALIDATION   ${validation}\n`, "ascii"),
+    Buffer.from(`VALIDATION ${validation}\n`, "ascii"),
 
-    // Amount words centered
-    center,
-    escY(41),
+    // Amount in words centered
+    centerX(numberToPesos(amount), 10, 900),
+    escY(45),
     fontThin,
     Buffer.from(`${numberToPesos(amount)}\n`, "ascii"),
 
     // Amount numeric centered
-    center,
+    centerX(`PHP${amount}`, 24),
     escY(50),
     fontLargeBold,
     Buffer.from(`PHP${amount}\n`, "ascii"),
 
-    // Left aligned details (valid date + asset)
-    left,
-    escY(49),
+    // Date + asset info left
+    escX(0),
+    escY(48),
     fontNormal,
     Buffer.from(`${validDate}\n`, "ascii"),
 
-    left,
+    escX(0),
     escY(53),
     fontThin,
     Buffer.from(`ASSET# ${assetId}   Ticket# ${ticketNo}\n`, "ascii"),
 
-    // Right aligned time
-    right,
-    escY(49),
+    // Time + expiry right
+    rightX(time, 12, 950, 0),
+    escY(48),
     fontNormal,
     Buffer.from(`${time}\n`, "ascii"),
 
-    right,
+    rightX("Never Expires", 10, 950, 0),
     escY(53),
     fontThin,
     Buffer.from(`Never Expires\n`, "ascii"),
 
     Buffer.from([0x0c]), // Form feed
   ]);
+}
+
+function buildDiagnosticTicket() {
+  function escX(pos) {
+    const n1 = Math.floor(pos / 256);
+    const n2 = pos % 256;
+    return Buffer.from([0x1b, 0x58, n1, n2]); // ESC X
+  }
+  function escY(y) {
+    return Buffer.from([0x1b, 0x59, y]); // ESC Y (mm)
+  }
+
+  const reset = Buffer.from([0x1b, 0x2a]);
+  const landscape = Buffer.from([0x1d, 0x56, 0x01]); // page mode landscape
+  const fontNormal = Buffer.from([0x1b, 0x46, 12, 12, 0]);
+  const fontLarge = Buffer.from([0x1b, 0x46, 18, 12, 1]);
+
+  const buffers = [reset, landscape, fontNormal];
+
+  // Print markers at fixed intervals (every 100 dots)
+  for (let x = 0; x <= 1200; x += 100) {
+    buffers.push(escX(x), escY(10), Buffer.from(`|${x}|\n`, "ascii"));
+  }
+
+  // Print a centered test text using our "guess"
+  const testText = "CENTER TEST";
+  const guessPageWidth = 950;
+  const textWidth = testText.length * 12; // 12 dots/char
+  const pos = Math.floor((guessPageWidth - textWidth) / 2);
+
+  buffers.push(
+    escX(pos),
+    escY(30),
+    fontLarge,
+    Buffer.from(`${testText}\n`, "ascii")
+  );
+
+  // Force page eject
+  buffers.push(Buffer.from([0x0c]));
+
+  return Buffer.concat(buffers);
 }
 
 // API endpoint to print
@@ -263,6 +337,8 @@ app.post("/print", (req, res) => {
     ticketNo: ticketNo || "0001",
     time: time || "12:00:00",
   });
+
+  // const data = buildDiagnosticTicket();
 
   printerPort.write(data, (err) => {
     if (err) {

@@ -53,7 +53,7 @@ function numberToPesos(num) {
     "TEN",
     "ELEVEN",
     "TWELVE",
-    "thirteen",
+    "THIRTEEN",
     "FOURTEEN",
     "FIFTEEN",
     "SIXTEEN",
@@ -100,8 +100,9 @@ function numberToPesos(num) {
           if (o) chunkWords += "-" + ones[o];
         }
 
-        words =
-          chunkWords + " " + scales[scaleIdx] + (words ? " " + words : "");
+        // Only add scale word if not empty
+        let scaleWord = scales[scaleIdx] ? " " + scales[scaleIdx] : "";
+        words = chunkWords + scaleWord + (words ? " " + words : "");
       }
       n = Math.floor(n / 1000);
       scaleIdx++;
@@ -121,7 +122,7 @@ function numberToPesos(num) {
     result += " AND NO CENTAVO";
   }
 
-  return result.charAt(0).toUpperCase() + result.slice(1);
+  return result.charAt(0).toUpperCase() + result.slice(1).toLowerCase();
 }
 
 /**
@@ -149,7 +150,7 @@ function buildTicket({
   }
 
   // NEW: center helper (ESC mode doesn’t have CENTER)
-  function centerX(text, fontWidthDots = 12, pageWidthDots = 980) {
+  function centerX(text, fontWidthDots = 12, pageWidthDots = 1100) {
     // total width of text in dots
     const textWidth = text.length * fontWidthDots;
 
@@ -158,8 +159,6 @@ function buildTicket({
 
     const n1 = Math.floor(pos / 256);
     const n2 = pos % 256;
-
-    console.log(n1, n2);
 
     return Buffer.from([0x1b, 0x58, n1, n2]); // ESC X
   }
@@ -177,7 +176,7 @@ function buildTicket({
     const dataLength = data.length;
 
     // Empirical formula based on Epic Edge behavior
-    const modulesPerChar = 6.2; // instead of 11
+    const modulesPerChar = 7; // instead of 11
 
     const totalModules = Math.round(dataLength * modulesPerChar);
     const barcodeWidth = totalModules * moduleWidth;
@@ -188,11 +187,10 @@ function buildTicket({
 
   // --- Base setup ---
   const reset = Buffer.from([0x1b, 0x2a]); // Reset
-  const landscape = Buffer.from([0x1d, 0x56, 0x01]); // Landscape
-  const fontNormal = Buffer.from([0x1b, 0x46, 12, 12, 0]); // 12pt
-  const fontSmall = Buffer.from([0x1b, 0x46, 8, 8, 0]); // 8pt
-  const fontLargeBold = Buffer.from([0x1b, 0x46, 24, 24, 1]); // 24pt bold
-  const fontThin = Buffer.from([0x1b, 0x46, 10, 10, 0]); // thin (Arial-ish)
+  const landscape = Buffer.from([0x1d, 0x56, 0x04]); // Landscape
+  const fontNormal = Buffer.from([0x1b, 0x46, 10, 10, 0]); // 10pt
+  const fontLargeBold = Buffer.from([0x1b, 0x46, 22, 22, 1]); // 24pt bold
+  const fontThin = Buffer.from([0x1b, 0x46, 8, 8, 0]); // thin (Arial-ish)
 
   const cleanValidation = (validation || "").replace(/\D/g, ""); // for barcode
 
@@ -210,7 +208,7 @@ function buildTicket({
     landscape,
 
     // VoucherType centered
-    centerX(voucherType, 24, 950),
+    centerX(voucherType, 22, 900),
     escY(5),
     fontLargeBold,
     Buffer.from(`${voucherType}\n`, "ascii"),
@@ -222,27 +220,27 @@ function buildTicket({
     Buffer.from("\n", "ascii"),
 
     // Validation centered
-    centerX(`VALIDATION ${validation}`, 12),
+    centerX(`VALIDATION ${validation}`, 10, 950),
     escY(40),
     fontNormal,
     Buffer.from(`VALIDATION ${validation}\n`, "ascii"),
 
     // Amount in words centered
-    centerX(numberToPesos(amount), 10, 900),
-    escY(45),
+    centerX(numberToPesos(amount), 10, 950),
+    escY(43),
     fontThin,
     Buffer.from(`${numberToPesos(amount)}\n`, "ascii"),
 
     // Amount numeric centered
-    centerX(`PHP${amount}`, 24),
+    centerX(`PHP${amount}`, 24, 950),
     escY(50),
     fontLargeBold,
     Buffer.from(`PHP${amount}\n`, "ascii"),
 
     // Date + asset info left
     escX(0),
-    escY(48),
-    fontNormal,
+    escY(50),
+    fontThin,
     Buffer.from(`${validDate}\n`, "ascii"),
 
     escX(0),
@@ -252,8 +250,8 @@ function buildTicket({
 
     // Time + expiry right
     rightX(time, 12, 950, 0),
-    escY(48),
-    fontNormal,
+    escY(50),
+    fontThin,
     Buffer.from(`${time}\n`, "ascii"),
 
     rightX("Never Expires", 10, 950, 0),

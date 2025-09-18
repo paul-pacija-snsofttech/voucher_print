@@ -148,21 +148,27 @@ function buildTicket({
     return Buffer.from([0x1b, 0x59, y]); // ESC Y (mm)
   }
 
+  // NEW: center helper (ESC mode doesn’t have CENTER)
+  const center = Buffer.from([0x1b, 0x61, 1]); // ESC a 1 = center
+  const left = Buffer.from([0x1b, 0x61, 0]); // ESC a 0 = left
+  const right = Buffer.from([0x1b, 0x61, 2]); // ESC a 2 = right
+
   // --- Base setup ---
   const reset = Buffer.from([0x1b, 0x2a]); // Reset
   const landscape = Buffer.from([0x1d, 0x56, 0x01]); // Landscape
-  const portrait = Buffer.from([0x1d, 0x56, 0x00]); // Portrait
-  const fontNormal = Buffer.from([0x1b, 0x46, 12, 12, 0]); // 10pt normal
-  const fontSmall = Buffer.from([0x1b, 0x46, 8, 8, 0]); // 8pt normal
+  const fontNormal = Buffer.from([0x1b, 0x46, 12, 12, 0]); // 12pt
+  const fontSmall = Buffer.from([0x1b, 0x46, 8, 8, 0]); // 8pt
   const fontLargeBold = Buffer.from([0x1b, 0x46, 24, 24, 1]); // 24pt bold
-  const fontThin = Buffer.from([0x1b, 0x46, 10, 10, 0]); // arial
+  const fontThin = Buffer.from([0x1b, 0x46, 10, 10, 0]); // thin (Arial-ish)
+
+  const cleanValidation = (validation || "").replace(/\D/g, ""); // for barcode
 
   // --- Barcode (Code128-B) ---
   const barcode = Buffer.concat([
     Buffer.from([0x1d, 0x68, 200]), // Height
     Buffer.from([0x1d, 0x77, 6]), // Width
-    Buffer.from([0x1d, 0x6b, 0x09, validation.length]), // GS k n=9 (Code128-B), m=length
-    Buffer.from(validation, "ascii"),
+    Buffer.from([0x1d, 0x6b, 0x09, cleanValidation.length]),
+    Buffer.from(cleanValidation, "ascii"),
   ]);
 
   // --- Content ---
@@ -170,54 +176,57 @@ function buildTicket({
     reset,
     landscape,
 
-    escX(300),
-    escY(10),
+    // VoucherType centered
+    center, // assumes 24-dot font width
+    escY(5),
     fontLargeBold,
     Buffer.from(`${voucherType}\n`, "ascii"),
 
-    escX(235),
-    escY(17),
+    // Barcode centered
+    center, // approximate center
+    escY(12),
     barcode,
     Buffer.from("\n", "ascii"),
 
-    escX(240),
-    escY(45),
+    // Validation line centered
+    center,
+    escY(37),
     fontNormal,
     Buffer.from(`VALIDATION   ${validation}\n`, "ascii"),
 
-    escX(280),
-    escY(47),
+    // Amount words centered
+    center,
+    escY(41),
     fontThin,
     Buffer.from(`${numberToPesos(amount)}\n`, "ascii"),
 
-    escX(350),
+    // Amount numeric centered
+    center,
     escY(50),
     fontLargeBold,
     Buffer.from(`PHP${amount}\n`, "ascii"),
 
-    escX(0),
-    escY(45),
+    // Left aligned details (valid date + asset)
+    left,
+    escY(49),
     fontNormal,
     Buffer.from(`${validDate}\n`, "ascii"),
 
-    escX(0),
-    escY(50),
+    left,
+    escY(53),
     fontThin,
-    Buffer.from(`ASSET# ${assetId}    Ticket# ${ticketNo}\n`, "ascii"),
+    Buffer.from(`ASSET# ${assetId}   Ticket# ${ticketNo}\n`, "ascii"),
 
-    escX(860),
-    escY(45),
+    // Right aligned time
+    right,
+    escY(49),
     fontNormal,
     Buffer.from(`${time}\n`, "ascii"),
 
-    escX(860),
-    escY(50),
+    right,
+    escY(53),
     fontThin,
     Buffer.from(`Never Expires\n`, "ascii"),
-
-    portrait,
-    fontNormal,
-    Buffer.from(`${validation}\n`, "ascii"),
 
     Buffer.from([0x0c]), // Form feed
   ]);

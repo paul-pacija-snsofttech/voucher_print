@@ -263,47 +263,6 @@ function buildTicket({
   ]);
 }
 
-function buildDiagnosticTicket() {
-  function escX(pos) {
-    const n1 = Math.floor(pos / 256);
-    const n2 = pos % 256;
-    return Buffer.from([0x1b, 0x58, n1, n2]); // ESC X
-  }
-  function escY(y) {
-    return Buffer.from([0x1b, 0x59, y]); // ESC Y (mm)
-  }
-
-  const reset = Buffer.from([0x1b, 0x2a]);
-  const landscape = Buffer.from([0x1d, 0x56, 0x01]); // page mode landscape
-  const fontNormal = Buffer.from([0x1b, 0x46, 12, 12, 0]);
-  const fontLarge = Buffer.from([0x1b, 0x46, 18, 12, 1]);
-
-  const buffers = [reset, landscape, fontNormal];
-
-  // Print markers at fixed intervals (every 100 dots)
-  for (let x = 0; x <= 1200; x += 100) {
-    buffers.push(escX(x), escY(10), Buffer.from(`|${x}|\n`, "ascii"));
-  }
-
-  // Print a centered test text using our "guess"
-  const testText = "CENTER TEST";
-  const guessPageWidth = 950;
-  const textWidth = testText.length * 12; // 12 dots/char
-  const pos = Math.floor((guessPageWidth - textWidth) / 2);
-
-  buffers.push(
-    escX(pos),
-    escY(30),
-    fontLarge,
-    Buffer.from(`${testText}\n`, "ascii")
-  );
-
-  // Force page eject
-  buffers.push(Buffer.from([0x0c]));
-
-  return Buffer.concat(buffers);
-}
-
 // API endpoint to print
 app.post("/print", (req, res) => {
   if (!printerPort || !printerPort.isOpen) {

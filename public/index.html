@@ -11,13 +11,22 @@
         background: #f9f9f9;
       }
       form {
-        max-width: 400px;
+        max-width: 450px;
         margin: auto;
         text-align: left;
         background: #fff;
         padding: 15px;
         border-radius: 8px;
         border: 1px solid #ddd;
+      }
+      fieldset {
+        margin-bottom: 20px;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+      }
+      legend {
+        font-weight: bold;
       }
       label {
         display: block;
@@ -48,28 +57,192 @@
     <h1>Cashout Ticket Printer</h1>
 
     <form id="ticketForm">
-      <label>Voucher Type</label>
-      <input type="text" name="voucherType" value="CASHOUT TICKET" />
+      <!-- Ticket 1 -->
+      <fieldset>
+        <legend>Ticket #1</legend>
+        <label>Voucher Type</label>
+        <input
+          type="text"
+          name="tickets[0][voucherType]"
+          value="CASHOUT TICKET"
+        />
 
-      <label>Asset ID</label>
-      <input type="text" name="assetId" value="116" />
+        <label>Asset ID</label>
+        <input type="text" name="tickets[0][assetId]" value="116" />
 
-      <label>Validation Code</label>
-      <input type="text" name="validation" value="008148698884820041" />
+        <label>Validation Code</label>
+        <input
+          type="text"
+          name="tickets[0][validation]"
+          value="00-8148-6988-8482-0041"
+        />
 
-      <label>Ticket Number</label>
-      <input type="text" name="ticketNo" value="17" />
+        <label>Ticket Number</label>
+        <input type="text" name="tickets[0][ticketNo]" value="17" />
 
-      <label>Date</label>
-      <input type="text" name="validDate" value="01 August 2025" />
+        <label>Date</label>
+        <input
+          type="text"
+          name="tickets[0][validDate]"
+          value="01 August 2025"
+        />
 
-      <label>Time</label>
-      <input type="text" name="time" value="10:15:14" />
+        <label>Time</label>
+        <input type="text" name="tickets[0][time]" value="10:15:14" />
 
-      <label>Amount (PHP)</label>
-      <input type="text" name="amount" value="833.00" />
+        <label>Amount (PHP)</label>
+        <input type="text" name="tickets[0][amount]" value="833.00" />
+      </fieldset>
 
-      <button type="submit">🖨️ Print Ticket</button>
+      <!-- Ticket 2 -->
+      <fieldset>
+        <legend>Ticket #2</legend>
+        <label>Voucher Type</label>
+        <input
+          type="text"
+          name="tickets[1][voucherType]"
+          value="CASHOUT TICKET"
+        />
+
+        <label>Asset ID</label>
+        <input type="text" name="tickets[1][assetId]" value="117" />
+
+        <label>Validation Code</label>
+        <input
+          type="text"
+          name="tickets[1][validation]"
+          value="00-7123-8123-1451-1142"
+        />
+
+        <label>Ticket Number</label>
+        <input type="text" name="tickets[1][ticketNo]" value="18" />
+
+        <label>Date</label>
+        <input
+          type="text"
+          name="tickets[1][validDate]"
+          value="02 August 2025"
+        />
+
+        <label>Time</label>
+        <input type="text" name="tickets[1][time]" value="10:40:00" />
+
+        <label>Amount (PHP)</label>
+        <input type="text" name="tickets[1][amount]" value="600.00" />
+      </fieldset>
+
+      <!-- Ticket 3 -->
+      <fieldset>
+        <legend>Ticket #3</legend>
+        <label>Voucher Type</label>
+        <input
+          type="text"
+          name="tickets[2][voucherType]"
+          value="CASHOUT TICKET"
+        />
+
+        <label>Asset ID</label>
+        <input type="text" name="tickets[2][assetId]" value="117" />
+
+        <label>Validation Code</label>
+        <input
+          type="text"
+          name="tickets[2][validation]"
+          value="00-1341-1313-9241-9943"
+        />
+
+        <label>Ticket Number</label>
+        <input type="text" name="tickets[2][ticketNo]" value="19" />
+
+        <label>Date</label>
+        <input
+          type="text"
+          name="tickets[2][validDate]"
+          value="03 August 2025"
+        />
+
+        <label>Time</label>
+        <input type="text" name="tickets[2][time]" value="10:30:00" />
+
+        <label>Amount (PHP)</label>
+        <input type="text" name="tickets[2][amount]" value="700.00" />
+      </fieldset>
+
+      <!-- Ticket 4 -->
+      <fieldset>
+        <legend>Ticket #4</legend>
+        <label>Voucher Type</label>
+        <input
+          type="text"
+          name="tickets[3][voucherType]"
+          value="CASHOUT TICKET"
+        />
+
+        <label>Asset ID</label>
+        <input type="text" name="tickets[3][assetId]" value="117" />
+
+        <label>Validation Code</label>
+        <input
+          type="text"
+          name="tickets[3][validation]"
+          value="00-9212-6123-9213-9944"
+        />
+
+        <label>Ticket Number</label>
+        <input type="text" name="tickets[3][ticketNo]" value="20" />
+
+        <label>Date</label>
+        <input
+          type="text"
+          name="tickets[3][validDate]"
+          value="04 August 2025"
+        />
+
+        <label>Time</label>
+        <input type="text" name="tickets[3][time]" value="10:50:00" />
+
+        <label>Amount (PHP)</label>
+        <input type="text" name="tickets[3][amount]" value="923.00" />
+      </fieldset>
+
+      <!-- Ticket 5 -->
+      <fieldset>
+        <legend>Ticket #5</legend>
+        <label>Voucher Type</label>
+        <input
+          type="text"
+          name="tickets[4][voucherType]"
+          value="CASHOUT TICKET"
+        />
+
+        <label>Asset ID</label>
+        <input type="text" name="tickets[4][assetId]" value="117" />
+
+        <label>Validation Code</label>
+        <input
+          type="text"
+          name="tickets[4][validation]"
+          value="00-1212-6123-9213-9945"
+        />
+
+        <label>Ticket Number</label>
+        <input type="text" name="tickets[4][ticketNo]" value="21" />
+
+        <label>Date</label>
+        <input
+          type="text"
+          name="tickets[4][validDate]"
+          value="05 August 2025"
+        />
+
+        <label>Time</label>
+        <input type="text" name="tickets[4][time]" value="11:00:00" />
+
+        <label>Amount (PHP)</label>
+        <input type="text" name="tickets[4][amount]" value="1999.00" />
+      </fieldset>
+
+      <button type="submit">🖨️ Print Both Tickets</button>
     </form>
 
     <script>
@@ -77,12 +250,24 @@
 
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const data = Object.fromEntries(new FormData(form).entries());
+        const formData = new FormData(form);
+
+        // Convert FormData into structured tickets array
+        const tickets = [];
+        for (const [key, value] of formData.entries()) {
+          const match = key.match(/tickets\[(\d+)\]\[(.+)\]/);
+          if (match) {
+            const index = parseInt(match[1], 10);
+            const field = match[2];
+            if (!tickets[index]) tickets[index] = {};
+            tickets[index][field] = value;
+          }
+        }
 
         const res = await fetch("/print", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
+          body: JSON.stringify({ tickets }),
         });
 
         const result = await res.json();

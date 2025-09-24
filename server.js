@@ -239,6 +239,47 @@ function buildTicket({
   ]);
 }
 
+// --- Helper: send DLE EOT command ---
+function requestPrinterStatus(n = 2) {
+  return new Promise((resolve, reject) => {
+    if (!printerPort || !printerPort.isOpen) {
+      return reject(new Error("Printer not connected"));
+    }
+
+    const cmd = Buffer.from([0x10, 0x04, n]); // DLE EOT n
+    let timer;
+
+    const onData = (data) => {
+      clearTimeout(timer);
+      printerPort.off("data", onData);
+
+      const status = data[0];
+      console.log("📥 Status response:", status.toString(2).padStart(8, "0"));
+
+      // Paper status (n=2)
+      if (n === 2 && status & 0x60) {
+        return reject(new Error("❌ Paper out or near end"));
+      }
+
+      resolve(status);
+    };
+
+    printerPort.on("data", onData);
+    printerPort.write(cmd, (err) => {
+      if (err) {
+        printerPort.off("data", onData);
+        return reject(new Error("Failed to request status: " + err.message));
+      }
+    });
+
+    // timeout if no response
+    timer = setTimeout(() => {
+      printerPort.off("data", onData);
+      reject(new Error("Status request timeout"));
+    }, 500);
+  });
+}
+
 // --- Print queue ---
 const printQueue = [];
 let isPrinting = false;
@@ -250,12 +291,14 @@ async function processQueue() {
   const { data, ticketNo } = printQueue.shift();
 
   try {
-    printerPort.write(data, (err) => {
+    printerPort.write(data, async (err) => {
       if (err) {
         console.error("❌ Print failed for ticket", ticketNo, err.message);
       } else {
         console.log("✅ Printed ticket", ticketNo);
       }
+      // ✅ After printing, check paper status
+      await requestPrinterStatus(2);
       isPrinting = false;
       processQueue(); // continue with next job
     });

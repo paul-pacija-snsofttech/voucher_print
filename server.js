@@ -22,8 +22,11 @@ try {
     autoOpen: true,
   });
 
-  printerPort.on("open", () => {
+  printerPort.on("open", async () => {
     console.log(`✅ Printer connected at ${SERIAL_PATH}`);
+
+    // Run both GS z and GS S checks on connect
+    await sendStatusRequest();
   });
 
   printerPort.on("error", (err) => {
@@ -225,6 +228,19 @@ function buildTicket({
         // CUT
         Buffer.from(PRINTER_CMDS.FF),
       ]);
+    case PRINTER_CMDS.TEMPLATE.B:
+      return Buffer.concat([
+        // TITLE
+        Buffer.from(PRINTER_CMDS.RESET_INIT),
+        Buffer.from(PRINTER_CMDS.ORIENTATION(1)),
+        Buffer.from(PRINTER_CMDS.PRINT_DIRECTION(1)),
+        Buffer.from(PRINTER_CMDS.ALIGN.CENTER),
+        Buffer.from(PRINTER_CMDS.ALIGN.CENTER),
+        Buffer.from(PRINTER_CMDS.LF),
+        Buffer.from(PRINTER_CMDS.LF),
+        Buffer.from(PRINTER_CMDS.TITLE(20, 1, 1)),
+        Buffer.from(`TESTING TEMPLATE B\n`, "ascii"),
+      ]);
     default:
       return;
   }
@@ -234,27 +250,135 @@ function buildTicket({
 const printQueue = [];
 let isPrinting = false;
 
-// Process queue
-function processQueue() {
+async function processQueue() {
   if (isPrinting || !printQueue.length || !printerPort?.isOpen) return;
 
   isPrinting = true;
   const job = printQueue.shift();
 
-  printerPort.write(job.data, (err) => {
+  printerPort.write(job.data, async (err) => {
     if (err) {
-      console.error(`❌ Failed to print Ticket#${job.ticketNo}:`, err.message);
-    } else {
-      console.log(`🖨️ Printed Ticket#${job.ticketNo}`);
+      addLog(`❌ Failed to print Ticket#${job.ticketNo}: ${err.message}`);
+      isPrinting = false;
+      return processQueue(); // skip to next
     }
 
-    isPrinting = false;
-    processQueue(); // immediately process next
+    try {
+      await waitForPrinterReady();
+      addLog(`✅ Ticket#${job.ticketNo} printed successfully`);
+
+      setTimeout(() => {
+        isPrinting = false;
+        processQueue();
+      }, 10000);
+    } catch (statusErr) {
+      addLog(`❌ Ticket#${job.ticketNo} failed: ${statusErr.message}`);
+      printQueue.unshift(job); // requeue this ticket
+      isPrinting = false;
+      setTimeout(processQueue, 3000);
+    }
   });
 }
 
+async function waitForPrinterReady() {
+  return new Promise((resolve, reject) => {
+    const check = async () => {
+      try {
+        await sendStatusRequest();
+        resolve();
+      } catch (err) {
+        if (
+          err.message.includes("Out of tickets") ||
+          err.message.includes("Paper jam")
+        ) {
+          reject(err);
+        } else {
+          setTimeout(check, 500);
+        }
+      }
+    };
+    check();
+  });
+}
+
+async function sendStatusRequest() {
+  const errors = [];
+
+  await new Promise((resolve) => {
+    const cmd = Buffer.from([0x1d, 0x7a]);
+    printerPort.write(cmd, (err) => {
+      if (err) {
+        addLog(`❌ Failed to send GS z: ${err.message}`);
+        return resolve();
+      }
+    });
+
+    printerPort.once("data", (data) => {
+      const s = data[0];
+
+      if (s & PRINTER_CMDS.GS_Z_ERRORS.TICKET_IN_PRINTER) {
+        addLog("✅ Ticket in printer");
+      } else {
+        errors.push("❌ No ticket in printer");
+      }
+
+      if (s & PRINTER_CMDS.GS_Z_ERRORS.PAPER_JAM) {
+        errors.push("❌ Paper jam");
+      }
+
+      resolve();
+    });
+  });
+
+  await new Promise((resolve) => {
+    const cmd = Buffer.from([0x1d, 0x53]);
+    printerPort.write(cmd, (err) => {
+      if (err) {
+        addLog(`❌ Failed to send GS S: ${err.message}`);
+        return resolve();
+      }
+    });
+
+    printerPort.once("data", (data) => {
+      const s = data[0];
+
+      if (s & PRINTER_CMDS.GS_S_ERRORS.PRINTER_READY) {
+        addLog("✅ Printer Ready");
+      } else {
+        errors.push("⏳ Printer Not Ready");
+      }
+
+      if (s & PRINTER_CMDS.GS_S_ERRORS.HEAD_IS_UP) {
+        errors.push("⚠️ Head is up");
+      }
+      if (s & PRINTER_CMDS.GS_S_ERRORS.CHASSIS_OPEN) {
+        errors.push("⚠️ Chassis open");
+      }
+      if (s & PRINTER_CMDS.GS_S_ERRORS.OUT_OF_TICKETS) {
+        errors.push("❌ Out of tickets");
+      }
+
+      resolve();
+    });
+  });
+
+  if (errors.length) throw new Error(errors.join(", "));
+  addLog("✅ Ticket Status OK");
+}
+
+const statusLog = [];
+function addLog(message) {
+  const entry = { time: new Date().toISOString(), message };
+  statusLog.push(entry);
+
+  // Keep only last 100 logs
+  if (statusLog.length > 100) statusLog.shift();
+
+  console.log(message); // still log to terminal
+}
+
 // --- /print endpoint ---
-app.post("/print", (req, res) => {
+app.post("/print", async (req, res) => {
   let tickets = [];
 
   if (Array.isArray(req.body)) {
@@ -269,23 +393,38 @@ app.post("/print", (req, res) => {
       .json({ success: false, message: "No tickets provided" });
   }
 
-  console.log("📥 Incoming tickets:", tickets);
+  try {
+    await sendStatusRequest();
 
-  for (const ticket of tickets) {
-    const newTicket = { ...ticket, template: "A" };
-    const data = buildTicket(newTicket);
+    for (const ticket of tickets) {
+      const newTicket = { ...ticket, template: "A" };
+      const data = buildTicket(newTicket);
 
-    printQueue.push({
-      data,
-      ticketNo: ticket.ticketNo,
-    });
+      printQueue.push({ data, ticketNo: ticket.ticketNo });
+      addLog(`📝 Ticket#${ticket.ticketNo} queued`);
+    }
 
     processQueue();
-  }
 
+    return res.json({
+      success: true,
+      message: `${tickets.length} ticket(s) queued for print`,
+    });
+  } catch (err) {
+    addLog(`❌ Printer error: ${err.message}`);
+    return res.status(500).json({
+      success: false,
+      message: "Printer error",
+      details: err.message,
+    });
+  }
+});
+
+// --- /status endpoint ---
+app.get("/status", (req, res) => {
   res.json({
     success: true,
-    message: `${tickets.length} ticket(s) queued for print`,
+    log: statusLog,
   });
 });
 

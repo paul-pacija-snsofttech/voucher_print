@@ -91,5 +91,25 @@ export const PRINTER_CMDS = {
 
   TEMPLATE: {
     A: "A" || "a",
+    B: "B" || "b",
+  },
+
+  GS_Z_ERRORS: {
+    TICKET_LOW: 0x01,
+    TICKET_IN_PRINTER: 0x02,
+    TOP_OF_FORM: 0x04,
+    BARCODE_COMPLETED: 0x10,
+    VALIDATION_COMPLETED: 0x20,
+    TICKET_IN_PATH: 0x40,
+    PAPER_JAM: 0x80,
+    TICKET_STATUS_OK: 0x00,
+  },
+
+  GS_S_ERRORS: {
+    PRINTER_READY: 0x01,
+    TOP_OF_FORM: 0x02,
+    HEAD_IS_UP: 0x08,
+    CHASSIS_OPEN: 0x10,
+    OUT_OF_TICKETS: 0x20,
   },
 };

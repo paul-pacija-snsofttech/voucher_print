@@ -1,5 +1,5 @@
 // monitor-lines.js
-const { SerialPort } = require("serialport");
+import { SerialPort } from "serialport";
 
 const SERIAL_PATH = "/dev/tty.usbmodemEpic_Edge1"; // update if needed
 const BAUD_RATE = 9600;
@@ -23,9 +23,35 @@ const port = new SerialPort({
 
 port.on("open", () => {
   console.log("✅ Port opened:", SERIAL_PATH);
+
+  // Send status request [GS] z (0x1D 0x7A)
+  const statusCmd = Buffer.from([0x1d, 0x7a]);
+  port.write(statusCmd, (err) => {
+    if (err) return console.error("Write error:", err);
+    console.log("📥 Response:", statusCmd);
+    console.log("➡️ Sent GS z (request printer status)");
+  });
+
   // print header
   console.log("Polling modem control lines every", POLL_MS, "ms");
   pollLoop();
+});
+
+port.on("data", (data) => {
+  console.log("pumasok dito?");
+  const status = data[0];
+  console.log("📥 Raw status byte:", data.toString("hex"));
+
+  // Interpret bits
+  console.log("🧾 Decoded status:");
+  console.log(`  Bit0 (Ticket low): ${status & 0x01 ? "Yes" : "No"}`);
+  console.log(`  Bit1 (Ticket in printer): ${status & 0x02 ? "Yes" : "No"}`);
+  console.log(`  Bit2 (Top of Form): ${status & 0x04 ? "Yes" : "No"}`);
+  console.log(`  Bit3 (Reserved, always 1): ${status & 0x08 ? "1" : "0"}`);
+  console.log(`  Bit4 (Barcode completed): ${status & 0x10 ? "Yes" : "No"}`);
+  console.log(`  Bit5 (Validation completed): ${status & 0x20 ? "Yes" : "No"}`);
+  console.log(`  Bit6 (Ticket in path): ${status & 0x40 ? "Yes" : "No"}`);
+  console.log(`  Bit7 (Paper jam): ${status & 0x80 ? "Yes" : "No"}`);
 });
 
 port.on("error", (err) => {
@@ -69,7 +95,6 @@ function interpretStatus(status) {
 
 function pollLoop() {
   port.get((err, status) => {
-    console.log("status", status);
     if (err) {
       console.error("❌ Failed to read modem lines:", err.message);
       setTimeout(pollLoop, POLL_MS);

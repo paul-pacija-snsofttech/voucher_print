@@ -1,7 +1,7 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const path = require("path");
-const { SerialPort } = require("serialport");
+import express from "express";
+import { join } from "path";
+import { SerialPort } from "serialport";
+import { PRINTER_CMDS } from "./printerConstants.js";
 
 const app = express();
 const PORT = 3000;
@@ -34,8 +34,8 @@ try {
 }
 
 // Middleware
-app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.json());
+app.use(express.static(join(import.meta.dirname, "public")));
 
 // --- Number to Pesos function ---
 function numberToPesos(num) {
@@ -117,14 +117,15 @@ function numberToPesos(num) {
     result +=
       " AND " + inWords(centavos) + " CENTAVO" + (centavos === 1 ? "" : "S");
   } else {
-    result += " AND NO CENTAVO";
+    result += " AND NO CENTAVOS";
   }
 
-  return result.charAt(0).toUpperCase() + result.slice(1).toLowerCase();
+  return result.toUpperCase();
 }
 
 // --- Ticket builder ---
 function buildTicket({
+  template,
   location,
   assetId,
   floorLocation,
@@ -144,36 +145,6 @@ function buildTicket({
   function escY(y) {
     return Buffer.from([0x1b, 0x59, y]);
   }
-  function centerX(text, fontWidthDots = 12, pageWidthDots = 1100) {
-    const safeText = text || "";
-    const pos = Math.max(
-      0,
-      Math.floor((pageWidthDots - safeText.length * fontWidthDots) / 2)
-    );
-    return Buffer.from([0x1b, 0x58, Math.floor(pos / 256), pos % 256]);
-  }
-  function rightX(text, fontWidthDots = 12, pageWidthDots = 1000, margin = 50) {
-    const safeText = text || "";
-    const pos = Math.max(
-      0,
-      pageWidthDots - safeText.length * fontWidthDots - margin
-    );
-    return Buffer.from([0x1b, 0x58, Math.floor(pos / 256), pos % 256]);
-  }
-  function centerBarcode(data, moduleWidth = 6, pageWidthDots = 1000) {
-    const safeData = data || "";
-    const totalModules = Math.round(safeData.length * 7);
-    const pos = Math.floor((pageWidthDots - totalModules * moduleWidth) / 2);
-    return escX(pos);
-  }
-
-  const portrait = Buffer.from([0x1d, 0x56, 0x00]);
-  const portraitCenter = Buffer.from([0x1b, 0x61, 1]);
-  const reset = Buffer.from([0x1b, 0x2a]);
-  const landscape = Buffer.from([0x1d, 0x56, 0x04]);
-  const fontNormal = Buffer.from([0x1b, 0x46, 10, 10, 0]);
-  const fontLargeBold = Buffer.from([0x1b, 0x46, 22, 22, 1]);
-  const fontThin = Buffer.from([0x1b, 0x46, 8, 8, 0]);
   const cleanValidation = (validation || "").replace(/\D/g, "");
 
   const safeValidation = validation || "";
@@ -191,122 +162,95 @@ function buildTicket({
     Buffer.from(cleanValidation, "ascii"),
   ]);
 
-  return Buffer.concat([
-    reset,
-    portrait,
-    portraitCenter,
-    fontNormal,
-    Buffer.from(`${safeValidation}\n`, "ascii"),
-    reset,
-    landscape,
-    centerX(safeVoucherType, 22, 900),
-    escY(5),
-    fontLargeBold,
-    Buffer.from(`${safeVoucherType}\n`, "ascii"),
-    centerBarcode(cleanValidation, 4),
-    escY(12),
-    barcode,
-    Buffer.from("\n", "ascii"),
-    centerX(`VALIDATION ${safeValidation}`, 10, 950),
-    escY(40),
-    fontNormal,
-    Buffer.from(`VALIDATION ${safeValidation}\n`, "ascii"),
-    centerX(numberToPesos(safeAmount), 10, 950),
-    escY(43),
-    fontThin,
-    Buffer.from(`${numberToPesos(safeAmount)}\n`, "ascii"),
-    centerX(`PHP${safeAmount}`, 24, 950),
-    escY(50),
-    fontLargeBold,
-    Buffer.from(`PHP${safeAmount}\n`, "ascii"),
-    escX(0),
-    escY(50),
-    fontThin,
-    Buffer.from(`${safeValidDate}\n`, "ascii"),
-    escX(0),
-    escY(53),
-    fontThin,
-    Buffer.from(`ASSET# ${safeAssetId}   Ticket# ${safeTicketNo}\n`, "ascii"),
-    rightX(safeTime, 12, 950, 0),
-    escY(50),
-    fontThin,
-    Buffer.from(`${safeTime}\n`, "ascii"),
-    rightX("Never Expires", 10, 950, 0),
-    escY(53),
-    fontThin,
-    Buffer.from(`Never Expires\n`, "ascii"),
-    Buffer.from([0x0c]),
-  ]);
-}
+  switch (template) {
+    case PRINTER_CMDS.TEMPLATE.A:
+      return Buffer.concat([
+        // validation on right side
+        Buffer.from(PRINTER_CMDS.RESET_INIT),
+        Buffer.from(PRINTER_CMDS.ORIENTATION(0)),
+        Buffer.from(PRINTER_CMDS.ALIGN.CENTER),
+        Buffer.from(PRINTER_CMDS.FONT_16CPI),
+        Buffer.from(`${safeValidation}\n`, "ascii"),
 
-// --- Helper: send DLE EOT command ---
-function requestPrinterStatus(n = 2) {
-  return new Promise((resolve, reject) => {
-    if (!printerPort || !printerPort.isOpen) {
-      return reject(new Error("Printer not connected"));
-    }
+        // TITLE
+        Buffer.from(PRINTER_CMDS.RESET_INIT),
+        Buffer.from(PRINTER_CMDS.ORIENTATION(1)),
+        Buffer.from(PRINTER_CMDS.PRINT_DIRECTION(1)),
+        Buffer.from(PRINTER_CMDS.ALIGN.CENTER),
+        Buffer.from(PRINTER_CMDS.ALIGN.CENTER),
+        Buffer.from(PRINTER_CMDS.LF),
+        Buffer.from(PRINTER_CMDS.LF),
+        Buffer.from(PRINTER_CMDS.TITLE(20, 1, 1)),
+        Buffer.from(`${safeVoucherType}\n`, "ascii"),
 
-    const cmd = Buffer.from([0x10, 0x04, n]); // DLE EOT n
-    let timer;
+        // BARCODE
+        barcode,
 
-    const onData = (data) => {
-      clearTimeout(timer);
-      printerPort.off("data", onData);
+        // VALIDATION
+        Buffer.from(PRINTER_CMDS.TITLE(10, 1, 1)),
+        Buffer.from(`VALIDATION ${safeValidation}\n`, "ascii"),
 
-      const status = data[0];
-      console.log("📥 Status response:", status.toString(2).padStart(8, "0"));
+        // AMOUNT
+        Buffer.from(PRINTER_CMDS.FONT_20CPI),
+        Buffer.from(`${numberToPesos(safeAmount)}\n`, "ascii"),
 
-      // Paper status (n=2)
-      if (n === 2 && status & 0x60) {
-        return reject(new Error("❌ Paper out or near end"));
-      }
+        // PHP AMOUNT
+        Buffer.from(PRINTER_CMDS.TITLE(20, 1, 1)),
+        Buffer.from(`PHP${safeAmount}\n`, "ascii"),
 
-      resolve(status);
-    };
+        // DATE
+        Buffer.from(PRINTER_CMDS.ALIGN.LEFT),
+        escX(0),
+        Buffer.from(PRINTER_CMDS.FONT_16CPI),
+        Buffer.from(`${safeValidDate}`, "ascii"),
 
-    printerPort.on("data", onData);
-    printerPort.write(cmd, (err) => {
-      if (err) {
-        printerPort.off("data", onData);
-        return reject(new Error("Failed to request status: " + err.message));
-      }
-    });
+        // TIME
+        Buffer.from(PRINTER_CMDS.ALIGN.RIGHT),
+        escX(900),
+        Buffer.from(PRINTER_CMDS.FONT_16CPI),
+        Buffer.from(`${safeTime}\n`, "ascii"),
 
-    // timeout if no response
-    timer = setTimeout(() => {
-      printerPort.off("data", onData);
-      reject(new Error("Status request timeout"));
-    }, 500);
-  });
+        // ASSET ID AND TICKET NO
+        Buffer.from(PRINTER_CMDS.ALIGN.LEFT),
+        escX(0),
+        Buffer.from(PRINTER_CMDS.FONT_20CPI),
+        Buffer.from(`ASSET# ${safeAssetId}   Ticket# ${safeTicketNo}`, "ascii"),
+
+        // EXPIRATION DATE
+        Buffer.from(PRINTER_CMDS.ALIGN.RIGHT),
+        escX(900),
+        Buffer.from(PRINTER_CMDS.FONT_20CPI),
+        Buffer.from(`Never Expires\n`, "ascii"),
+
+        // CUT
+        Buffer.from(PRINTER_CMDS.FF),
+      ]);
+    default:
+      return;
+  }
 }
 
 // --- Print queue ---
 const printQueue = [];
 let isPrinting = false;
 
-async function processQueue() {
-  if (isPrinting || printQueue.length === 0) return;
+// Process queue
+function processQueue() {
+  if (isPrinting || !printQueue.length || !printerPort?.isOpen) return;
+
   isPrinting = true;
+  const job = printQueue.shift();
 
-  const { data, ticketNo } = printQueue.shift();
+  printerPort.write(job.data, (err) => {
+    if (err) {
+      console.error(`❌ Failed to print Ticket#${job.ticketNo}:`, err.message);
+    } else {
+      console.log(`🖨️ Printed Ticket#${job.ticketNo}`);
+    }
 
-  try {
-    printerPort.write(data, async (err) => {
-      if (err) {
-        console.error("❌ Print failed for ticket", ticketNo, err.message);
-      } else {
-        console.log("✅ Printed ticket", ticketNo);
-      }
-      // ✅ After printing, check paper status
-      await requestPrinterStatus(2);
-      isPrinting = false;
-      processQueue(); // continue with next job
-    });
-  } catch (err) {
-    console.error("❌ Exception while printing", ticketNo, err);
     isPrinting = false;
-    processQueue();
-  }
+    processQueue(); // immediately process next
+  });
 }
 
 // --- /print endpoint ---
@@ -328,12 +272,14 @@ app.post("/print", (req, res) => {
   console.log("📥 Incoming tickets:", tickets);
 
   for (const ticket of tickets) {
-    const data = buildTicket(ticket);
+    const newTicket = { ...ticket, template: "A" };
+    const data = buildTicket(newTicket);
 
     printQueue.push({
       data,
       ticketNo: ticket.ticketNo,
     });
+
     processQueue();
   }
 
@@ -345,7 +291,7 @@ app.post("/print", (req, res) => {
 
 // Serve UI
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public/index.html"));
+  res.sendFile(join(__dirname, "public/index.html"));
 });
 
 // Start server

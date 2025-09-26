@@ -7,34 +7,63 @@ const app = express();
 const PORT = 3000;
 
 // Update this with your actual Epic Edge device path
-const SERIAL_PATH = "/dev/tty.usbmodemEpic_Edge1"; // use tty.*
+// const SERIAL_PATH = "/dev/tty.usbmodemEpic_Edge1"; // use tty.*
 const BAUD_RATE = 9600;
 
 let printerPort;
 
-// --- OPEN SERIAL PORT ---
-try {
-  printerPort = new SerialPort({
-    path: SERIAL_PATH,
-    baudRate: BAUD_RATE,
-    dataBits: 8,
-    stopBits: 1,
-    autoOpen: true,
-  });
+// Epic Edge Vendor & Product IDs
+const VENDOR_ID = "0613"; // hex but as string
+const PRODUCT_ID = "0960";
 
-  printerPort.on("open", async () => {
-    console.log(`✅ Printer connected at ${SERIAL_PATH}`);
+async function findEpicEdgePath() {
+  const ports = await SerialPort.list();
+
+  const epicEdge = ports.find(
+    (printer) =>
+      printer.vendorId?.toLowerCase() === VENDOR_ID &&
+      printer.productId?.toLowerCase() === PRODUCT_ID
+  );
+
+  if (!epicEdge) {
+    throw new Error("❌ Epic Edge printer not found");
+  }
+
+  console.log(`✅ Found Epic Edge at ${epicEdge.path}`);
+  return epicEdge.path;
+}
+
+// Example: open the port dynamically
+async function connectEpicEdge() {
+  try {
+    const path = await findEpicEdgePath();
+
+    printerPort = new SerialPort({
+      path,
+      baudRate: BAUD_RATE,
+      dataBits: 8,
+      stopBits: 1,
+      autoOpen: true,
+    });
+
+    printerPort.on("open", () =>
+      console.log(`🔌 Connected to Epic Edge on ${path}`)
+    );
 
     // Run both GS z and GS S checks on connect
     await sendStatusRequest();
-  });
 
-  printerPort.on("error", (err) => {
-    console.error("❌ Printer error:", err.message);
-  });
-} catch (err) {
-  console.error("❌ Failed to open printer:", err.message);
+    printerPort.on("error", (err) =>
+      console.error("Printer error:", err.message)
+    );
+
+    return printerPort;
+  } catch (err) {
+    console.error(err.message);
+  }
 }
+
+connectEpicEdge();
 
 // Middleware
 app.use(express.json());
@@ -293,7 +322,6 @@ async function processQueue() {
     });
   } catch (preCheckErr) {
     // ✅ Printer not ready - requeue without sending data
-    console.log("Printer pre-check failed:", preCheckErr.message);
     addLog(`⚠️ Ticket#${job.ticketNo} delayed: ${preCheckErr.message}`);
     printQueue.unshift(job); // put job back at front of queue
     isPrinting = false;

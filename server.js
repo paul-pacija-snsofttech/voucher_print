@@ -5,42 +5,83 @@ import { PRINTER_CMDS } from "./printerConstants.js";
 
 const app = express();
 const PORT = 3000;
-
-// Update this with your actual Epic Edge device path
-const SERIAL_PATH = "/dev/tty.usbmodemEpic_Edge1"; // use tty.*
 const BAUD_RATE = 9600;
+const DATA_BITS = 8;
+const STOP_BITS = 1;
+const AUTO_OPEN = true;
 
 let printerPort;
 
-// --- OPEN SERIAL PORT ---
-try {
-  printerPort = new SerialPort({
-    path: SERIAL_PATH,
-    baudRate: BAUD_RATE,
-    dataBits: 8,
-    stopBits: 1,
-    autoOpen: true,
-  });
+// Epic Edge Vendor & Product IDs
+const VENDOR_ID = "0613"; // hex but as string
+const PRODUCT_ID = "0960";
 
-  printerPort.on("open", async () => {
-    console.log(`✅ Printer connected at ${SERIAL_PATH}`);
+/**
+ * Finds the path to the Epic Edge printer
+ * @returns {Promise<string>} The path to the Epic Edge printer
+ */
+async function findEpicEdgePath() {
+  const ports = await SerialPort.list();
+
+  const epicEdge = ports.find(
+    (printer) =>
+      printer.vendorId?.toLowerCase() === VENDOR_ID &&
+      printer.productId?.toLowerCase() === PRODUCT_ID
+  );
+
+  if (!epicEdge) {
+    throw new Error("❌ Epic Edge printer not found");
+  }
+
+  console.log(`✅ Found Epic Edge at ${epicEdge.path}`);
+  return epicEdge.path;
+}
+
+/**
+ * Connects to the Epic Edge printer
+ * Example: open the port dynamically
+ * @returns {Promise<SerialPort>} The SerialPort instance
+ */
+async function connectEpicEdge() {
+  try {
+    const path = await findEpicEdgePath();
+
+    printerPort = new SerialPort({
+      path,
+      baudRate: BAUD_RATE,
+      dataBits: DATA_BITS,
+      stopBits: STOP_BITS,
+      autoOpen: AUTO_OPEN,
+    });
+
+    printerPort.on("open", () =>
+      console.log(`🔌 Connected to Epic Edge on ${path}`)
+    );
 
     // Run both GS z and GS S checks on connect
     await sendStatusRequest();
-  });
 
-  printerPort.on("error", (err) => {
-    console.error("❌ Printer error:", err.message);
-  });
-} catch (err) {
-  console.error("❌ Failed to open printer:", err.message);
+    printerPort.on("error", (err) =>
+      console.error("Printer error:", err.message)
+    );
+
+    return printerPort;
+  } catch (err) {
+    console.error(err.message);
+  }
 }
+
+connectEpicEdge();
 
 // Middleware
 app.use(express.json());
 app.use(express.static(join(import.meta.dirname, "public")));
 
-// --- Number to Pesos function ---
+/**
+ * Converts a number to a string of pesos and centavos
+ * @param {number} num
+ * @returns {string} The string of pesos and centavos
+ */
 function numberToPesos(num) {
   if (typeof num !== "number") num = parseFloat(num);
   if (isNaN(num)) return "Invalid amount";
@@ -126,7 +167,20 @@ function numberToPesos(num) {
   return result.toUpperCase();
 }
 
-// --- Ticket builder ---
+/**
+ * Builds a ticket
+ * @param {string} template
+ * @param {string} location
+ * @param {string} assetId
+ * @param {string} floorLocation
+ * @param {string} voucherType
+ * @param {string} validDate
+ * @param {number} amount
+ * @param {string} validation
+ * @param {string} ticketNo
+ * @param {string} time
+ * @returns {Buffer} The ticket data
+ */
 function buildTicket({
   template,
   location,
@@ -246,10 +300,12 @@ function buildTicket({
   }
 }
 
-// --- Print queue ---
+/**
+ * Print queue
+ * @returns {Promise<void>}
+ */
 const printQueue = [];
 let isPrinting = false;
-
 async function processQueue() {
   if (isPrinting || !printQueue.length || !printerPort?.isOpen) return;
 
@@ -293,7 +349,6 @@ async function processQueue() {
     });
   } catch (preCheckErr) {
     // ✅ Printer not ready - requeue without sending data
-    console.log("Printer pre-check failed:", preCheckErr.message);
     addLog(`⚠️ Ticket#${job.ticketNo} delayed: ${preCheckErr.message}`);
     printQueue.unshift(job); // put job back at front of queue
     isPrinting = false;
@@ -301,6 +356,12 @@ async function processQueue() {
   }
 }
 
+/**
+ * Waits until the printer is done
+ * @param {number} maxAttempts
+ * @param {number} interval
+ * @returns {Promise<{ready: boolean}>} The status of the printer
+ */
 async function waitUntilPrinterDone(maxAttempts = 60, interval = 1000) {
   let sawTicket = false;
 
@@ -329,6 +390,10 @@ async function waitUntilPrinterDone(maxAttempts = 60, interval = 1000) {
   throw new Error("Timeout waiting for printer to finish");
 }
 
+/**
+ * Sends a status request to the printer
+ * @returns {Promise<{barcodeCompleted: boolean, printerReady: boolean, errors: string[]}>} The status of the printer
+ */
 async function sendStatusRequest() {
   const status = {
     barcodeCompleted: false,
@@ -397,6 +462,11 @@ async function sendStatusRequest() {
   return status;
 }
 
+/**
+ * Adds a log to the status log
+ * @param {string} message
+ * @returns {void}
+ */
 const statusLog = [];
 function addLog(message) {
   const entry = { time: new Date().toISOString(), message };
@@ -408,7 +478,12 @@ function addLog(message) {
   console.log(message); // still log to terminal
 }
 
-// --- /print endpoint ---
+/**
+ * Prints tickets
+ * @param {Request} req
+ * @param {Response} res
+ * @returns {Promise<Response>} The response
+ */
 app.post("/print", async (req, res) => {
   let tickets = [];
 
@@ -449,7 +524,12 @@ app.post("/print", async (req, res) => {
   }
 });
 
-// --- /status endpoint ---
+/**
+ * Gets the status log
+ * @param {Request} req
+ * @param {Response} res
+ * @returns {Promise<Response>} The response
+ */
 app.get("/status", (req, res) => {
   res.json({
     success: true,
@@ -457,12 +537,20 @@ app.get("/status", (req, res) => {
   });
 });
 
-// Serve UI
+/**
+ * Serves the UI
+ * @param {Request} req
+ * @param {Response} res
+ * @returns {Promise<Response>} The response
+ */
 app.get("/", (req, res) => {
   res.sendFile(join(__dirname, "public/index.html"));
 });
 
-// Start server
+/**
+ * Starts the server
+ * @returns {void}
+ */
 app.listen(PORT, () => {
   console.log(`🌐 Open http://localhost:${PORT}`);
 });

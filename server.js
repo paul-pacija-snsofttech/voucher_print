@@ -256,114 +256,145 @@ async function processQueue() {
   isPrinting = true;
   const job = printQueue.shift();
 
-  printerPort.write(job.data, async (err) => {
-    if (err) {
-      addLog(`❌ Failed to print Ticket#${job.ticketNo}: ${err.message}`);
-      isPrinting = false;
-      return processQueue(); // skip to next
+  try {
+    // ✅ Check printer status BEFORE sending data
+    const status = await sendStatusRequest();
+    if (!status.printerReady || status.errors.length > 0) {
+      throw new Error(`Printer not ready: ${status.errors.join(", ")}`);
     }
 
-    try {
-      await waitForPrinterReady();
-      addLog(`✅ Ticket#${job.ticketNo} printed successfully`);
-
-      setTimeout(() => {
+    // ✅ Only send data if printer is ready
+    printerPort.write(job.data, async (err) => {
+      if (err) {
+        addLog(`❌ Failed to print Ticket#${job.ticketNo}: ${err.message}`);
+        printQueue.unshift(job); // put job back at front of queue
         isPrinting = false;
-        processQueue();
-      }, 10000);
-    } catch (statusErr) {
-      addLog(`❌ Ticket#${job.ticketNo} failed: ${statusErr.message}`);
-      printQueue.unshift(job); // requeue this ticket
-      isPrinting = false;
-      setTimeout(processQueue, 3000);
-    }
-  });
+        setTimeout(processQueue, 3000); // retry later
+        return;
+      }
+
+      try {
+        const { ready } = await waitUntilPrinterDone(); // wait for completion
+        if (ready) {
+          isPrinting = false;
+          addLog(`✅ Ticket#${job.ticketNo} printed successfully`);
+          if (printQueue.length > 0) {
+            processQueue(); // move on immediately
+          }
+        }
+      } catch (statusErr) {
+        addLog(
+          `❌ Ticket#${job.ticketNo} failed during printing: ${statusErr.message}`
+        );
+        printQueue.unshift(job); // put job back at front of queue
+        isPrinting = false;
+        setTimeout(processQueue, 5000); // retry later with longer delay
+      }
+    });
+  } catch (preCheckErr) {
+    // ✅ Printer not ready - requeue without sending data
+    console.log("Printer pre-check failed:", preCheckErr.message);
+    addLog(`⚠️ Ticket#${job.ticketNo} delayed: ${preCheckErr.message}`);
+    printQueue.unshift(job); // put job back at front of queue
+    isPrinting = false;
+    setTimeout(processQueue, 5000); // retry later
+  }
 }
 
-async function waitForPrinterReady() {
-  return new Promise((resolve, reject) => {
-    const check = async () => {
-      try {
-        await sendStatusRequest();
-        resolve();
-      } catch (err) {
-        if (
-          err.message.includes("Out of tickets") ||
-          err.message.includes("Paper jam")
-        ) {
-          reject(err);
-        } else {
-          setTimeout(check, 500);
-        }
-      }
-    };
-    check();
-  });
+async function waitUntilPrinterDone(maxAttempts = 60, interval = 1000) {
+  let sawTicket = false;
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const status = await sendStatusRequest();
+
+    // Step 1: wait until ticket enters path
+    if (status.barcodeCompleted) {
+      sawTicket = true;
+    }
+
+    // Step 2: once ticket entered → wait until it leaves
+    if (sawTicket && status.printerReady) {
+      sawTicket = false;
+      return { ready: true };
+    }
+
+    // If fatal error
+    if (status.errors.length) {
+      throw new Error(status.errors.join(", "));
+    }
+
+    await new Promise((r) => setTimeout(r, interval));
+  }
+
+  throw new Error("Timeout waiting for printer to finish");
 }
 
 async function sendStatusRequest() {
-  const errors = [];
+  const status = {
+    barcodeCompleted: false,
+    printerReady: false,
+    errors: [],
+  };
 
+  // --- GS z ---
   await new Promise((resolve) => {
-    const cmd = Buffer.from([0x1d, 0x7a]);
-    printerPort.write(cmd, (err) => {
-      if (err) {
-        addLog(`❌ Failed to send GS z: ${err.message}`);
-        return resolve();
-      }
-    });
-
+    printerPort.write(Buffer.from([0x1d, 0x7a]));
     printerPort.once("data", (data) => {
       const s = data[0];
 
       if (s & PRINTER_CMDS.GS_Z_ERRORS.TICKET_IN_PRINTER) {
         addLog("✅ Ticket in printer");
       } else {
-        errors.push("❌ No ticket in printer");
+        status.errors.push("❌ No ticket in printer");
+      }
+
+      if (s & PRINTER_CMDS.GS_Z_ERRORS.TICKET_IN_PATH) {
+        status.errors.push("❌ Ticket in path");
+      }
+
+      if (s & PRINTER_CMDS.GS_Z_ERRORS.BARCODE_COMPLETED) {
+        status.barcodeCompleted = true;
       }
 
       if (s & PRINTER_CMDS.GS_Z_ERRORS.PAPER_JAM) {
-        errors.push("❌ Paper jam");
+        status.errors.push("❌ Paper jam");
       }
 
       resolve();
     });
   });
 
+  // --- GS S ---
   await new Promise((resolve) => {
-    const cmd = Buffer.from([0x1d, 0x53]);
-    printerPort.write(cmd, (err) => {
-      if (err) {
-        addLog(`❌ Failed to send GS S: ${err.message}`);
-        return resolve();
-      }
-    });
-
+    printerPort.write(Buffer.from([0x1d, 0x53]));
     printerPort.once("data", (data) => {
       const s = data[0];
 
       if (s & PRINTER_CMDS.GS_S_ERRORS.PRINTER_READY) {
+        status.printerReady = true;
         addLog("✅ Printer Ready");
       } else {
-        errors.push("⏳ Printer Not Ready");
+        status.errors.push("⏳ Printer Not Ready");
       }
 
       if (s & PRINTER_CMDS.GS_S_ERRORS.HEAD_IS_UP) {
-        errors.push("⚠️ Head is up");
+        status.errors.push("⚠️ Head is up");
       }
       if (s & PRINTER_CMDS.GS_S_ERRORS.CHASSIS_OPEN) {
-        errors.push("⚠️ Chassis open");
+        status.errors.push("⚠️ Chassis open");
       }
       if (s & PRINTER_CMDS.GS_S_ERRORS.OUT_OF_TICKETS) {
-        errors.push("❌ Out of tickets");
+        status.errors.push("❌ Out of tickets");
       }
 
       resolve();
     });
   });
 
-  if (errors.length) throw new Error(errors.join(", "));
-  addLog("✅ Ticket Status OK");
+  if (status.errors.length && !status.printerReady) {
+    throw new Error(status.errors.join(", "));
+  }
+  return status;
 }
 
 const statusLog = [];
@@ -371,8 +402,8 @@ function addLog(message) {
   const entry = { time: new Date().toISOString(), message };
   statusLog.push(entry);
 
-  // Keep only last 100 logs
-  if (statusLog.length > 100) statusLog.shift();
+  // Keep logs
+  statusLog.shift();
 
   console.log(message); // still log to terminal
 }
@@ -394,8 +425,6 @@ app.post("/print", async (req, res) => {
   }
 
   try {
-    await sendStatusRequest();
-
     for (const ticket of tickets) {
       const newTicket = { ...ticket, template: "A" };
       const data = buildTicket(newTicket);

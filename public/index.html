@@ -2,174 +2,382 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <title>Cashout Ticket Printer</title>
+    <title>Epic Edge Printer - Redis Queue System</title>
     <style>
-      body {
-        font-family: Arial, sans-serif;
-        text-align: center;
-        margin-top: 20px;
-        background: #f9f9f9;
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
-      form {
-        max-width: 450px;
-        margin: auto;
-        text-align: left;
-        background: #fff;
-        padding: 15px;
-        border-radius: 8px;
-        border: 1px solid #ddd;
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: 1fr 400px;
+        gap: 20px;
+      }
+      .card {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+      h1 {
+        text-align: center;
+        color: #2d3748;
+        margin-bottom: 30px;
+        font-size: 2.5rem;
+        font-weight: 700;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        grid-column: 1 / -1;
+      }
+      .form-section {
+        max-height: 70vh;
+        overflow-y: auto;
+      }
+      .status-section {
+        position: sticky;
+        top: 20px;
+        height: fit-content;
       }
       fieldset {
         margin-bottom: 20px;
-        padding: 10px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
+        padding: 16px;
+        border: 2px solid #e2e8f0;
+        border-radius: 12px;
+        background: #f8fafc;
       }
       legend {
-        font-weight: bold;
+        font-weight: 600;
+        color: #4a5568;
+        padding: 0 8px;
+        font-size: 1.1rem;
       }
       label {
         display: block;
-        margin-top: 10px;
-        font-weight: bold;
+        margin-top: 12px;
+        font-weight: 500;
+        color: #2d3748;
+        margin-bottom: 4px;
       }
       input {
         width: 100%;
-        padding: 8px;
-        margin-top: 4px;
+        padding: 10px 12px;
+        border: 2px solid #e2e8f0;
+        border-radius: 8px;
+        font-size: 14px;
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }
+      input:focus {
+        outline: none;
+        border-color: #4299e1;
+        box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+      }
+      .button-group {
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr 1fr;
+        gap: 12px;
+        margin-top: 24px;
       }
       button {
-        margin-top: 20px;
-        font-size: 18px;
-        padding: 12px;
-        background: #4caf50;
-        color: white;
+        flex: 1;
+        padding: 14px 20px;
+        font-size: 16px;
+        font-weight: 600;
         border: none;
-        border-radius: 8px;
+        border-radius: 10px;
         cursor: pointer;
+        transition: all 0.2s;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
       }
-      button:hover {
-        background: #45a049;
+      .btn-primary {
+        background: linear-gradient(135deg, #4299e1, #3182ce);
+        color: white;
+      }
+      .btn-primary:hover {
+        background: linear-gradient(135deg, #3182ce, #2c5aa0);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(50, 90, 160, 0.4);
+      }
+      .btn-secondary {
+        background: linear-gradient(135deg, #38a169, #2f855a);
+        color: white;
+      }
+      .btn-secondary:hover {
+        background: linear-gradient(135deg, #2f855a, #276749);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(47, 133, 90, 0.4);
+      }
+      .btn-warning {
+        background: linear-gradient(135deg, #ed8936, #dd6b20);
+        color: white;
+      }
+      .btn-warning:hover {
+        background: linear-gradient(135deg, #dd6b20, #c05621);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(221, 107, 32, 0.4);
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none !important;
+      }
+      .status-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid #e2e8f0;
+      }
+      .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+      }
+      .status-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+      }
+      .status-online {
+        background: #38a169;
+      }
+      .status-printing {
+        background: #ed8936;
+      }
+      .status-error {
+        background: #e53e3e;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      .log-container {
+        max-height: 400px;
+        overflow-y: auto;
+        background: #1a202c;
+        border-radius: 8px;
+        padding: 16px;
+        margin-top: 16px;
+        font-family: "Monaco", "Menlo", monospace;
+        font-size: 13px;
+      }
+      .log-entry {
+        margin-bottom: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .log-time {
+        color: #a0aec0;
+        font-size: 11px;
+      }
+      .log-message {
+        color: #e2e8f0;
+      }
+      .log-success {
+        color: #68d391;
+      }
+      .log-error {
+        color: #fc8181;
+      }
+      .log-warning {
+        color: #f6ad55;
+      }
+      .log-info {
+        color: #63b3ed;
+      }
+      .toast {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 16px 20px;
+        border-radius: 8px;
+        color: white;
+        font-weight: 600;
+        z-index: 1000;
+        opacity: 0;
+        transform: translateX(100%);
+        transition: all 0.3s ease;
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translateX(0);
+      }
+      .toast-success {
+        background: #38a169;
+      }
+      .toast-error {
+        background: #e53e3e;
+      }
+      .toast-warning {
+        background: #ed8936;
+      }
+      .loading-spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid #ffffff30;
+        border-radius: 50%;
+        border-top-color: white;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (max-width: 768px) {
+        .container {
+          grid-template-columns: 1fr;
+          gap: 16px;
+        }
+        .button-group {
+          grid-template-columns: 1fr;
+        }
+        h1 {
+          font-size: 2rem;
+        }
       }
     </style>
   </head>
   <body>
-    <h1>Cashout Ticket Printer</h1>
+    <div class="container">
+      <h1>🖨️ Epic Edge Printer Control</h1>
 
-    <form id="ticketForm">
-      <!-- Ticket 1 -->
-      <fieldset>
-        <legend>Ticket #1</legend>
-        <label>Voucher Type</label>
-        <input
-          type="text"
-          name="tickets[0][voucherType]"
-          value="CASHOUT TICKET"
-        />
+      <div class="card form-section">
+        <form id="ticketForm">
+          <!-- Ticket 1 -->
+          <fieldset>
+            <legend>Ticket #1</legend>
+            <label>Voucher Type</label>
+            <input
+              type="text"
+              name="tickets[0][voucherType]"
+              value="CASHOUT TICKET"
+            />
 
-        <label>Asset ID</label>
-        <input type="text" name="tickets[0][assetId]" value="116" />
+            <label>Asset ID</label>
+            <input type="text" name="tickets[0][assetId]" value="116" />
 
-        <label>Validation Code</label>
-        <input
-          type="text"
-          name="tickets[0][validation]"
-          value="00-8148-6988-8482-0041"
-        />
+            <label>Validation Code</label>
+            <input
+              type="text"
+              name="tickets[0][validation]"
+              value="00-8148-6988-8482-0041"
+            />
 
-        <label>Ticket Number</label>
-        <input type="text" name="tickets[0][ticketNo]" value="17" />
+            <label>Ticket Number</label>
+            <input type="text" name="tickets[0][ticketNo]" value="17" />
 
-        <label>Date</label>
-        <input
-          type="text"
-          name="tickets[0][validDate]"
-          value="01 August 2025"
-        />
+            <label>Date</label>
+            <input
+              type="text"
+              name="tickets[0][validDate]"
+              value="01 August 2025"
+            />
 
-        <label>Time</label>
-        <input type="text" name="tickets[0][time]" value="10:15:14" />
+            <label>Time</label>
+            <input type="text" name="tickets[0][time]" value="10:15:14" />
 
-        <label>Amount (PHP)</label>
-        <input type="text" name="tickets[0][amount]" value="833.00" />
-      </fieldset>
+            <label>Amount (PHP)</label>
+            <input type="text" name="tickets[0][amount]" value="833.00" />
+          </fieldset>
 
-      <!-- Ticket 2 -->
-      <fieldset>
-        <legend>Ticket #2</legend>
-        <label>Voucher Type</label>
-        <input
-          type="text"
-          name="tickets[1][voucherType]"
-          value="CASHOUT TICKET"
-        />
+          <!-- Ticket 2 -->
+          <fieldset>
+            <legend>Ticket #2</legend>
+            <label>Voucher Type</label>
+            <input
+              type="text"
+              name="tickets[1][voucherType]"
+              value="CASHOUT TICKET"
+            />
 
-        <label>Asset ID</label>
-        <input type="text" name="tickets[1][assetId]" value="117" />
+            <label>Asset ID</label>
+            <input type="text" name="tickets[1][assetId]" value="117" />
 
-        <label>Validation Code</label>
-        <input
-          type="text"
-          name="tickets[1][validation]"
-          value="00-7123-8123-1451-1142"
-        />
+            <label>Validation Code</label>
+            <input
+              type="text"
+              name="tickets[1][validation]"
+              value="00-7123-8123-1451-1142"
+            />
 
-        <label>Ticket Number</label>
-        <input type="text" name="tickets[1][ticketNo]" value="18" />
+            <label>Ticket Number</label>
+            <input type="text" name="tickets[1][ticketNo]" value="18" />
 
-        <label>Date</label>
-        <input
-          type="text"
-          name="tickets[1][validDate]"
-          value="02 August 2025"
-        />
+            <label>Date</label>
+            <input
+              type="text"
+              name="tickets[1][validDate]"
+              value="02 August 2025"
+            />
 
-        <label>Time</label>
-        <input type="text" name="tickets[1][time]" value="10:40:00" />
+            <label>Time</label>
+            <input type="text" name="tickets[1][time]" value="10:40:00" />
 
-        <label>Amount (PHP)</label>
-        <input type="text" name="tickets[1][amount]" value="600.00" />
-      </fieldset>
+            <label>Amount (PHP)</label>
+            <input type="text" name="tickets[1][amount]" value="600.00" />
+          </fieldset>
 
-      <!-- Ticket 3 -->
-      <fieldset>
-        <legend>Ticket #3</legend>
-        <label>Voucher Type</label>
-        <input
-          type="text"
-          name="tickets[2][voucherType]"
-          value="CASHOUT TICKET"
-        />
+          <!-- Ticket 3 -->
+          <fieldset>
+            <legend>Ticket #3</legend>
+            <label>Voucher Type</label>
+            <input
+              type="text"
+              name="tickets[2][voucherType]"
+              value="CASHOUT TICKET"
+            />
 
-        <label>Asset ID</label>
-        <input type="text" name="tickets[2][assetId]" value="117" />
+            <label>Asset ID</label>
+            <input type="text" name="tickets[2][assetId]" value="117" />
 
-        <label>Validation Code</label>
-        <input
-          type="text"
-          name="tickets[2][validation]"
-          value="00-1341-1313-9241-9943"
-        />
+            <label>Validation Code</label>
+            <input
+              type="text"
+              name="tickets[2][validation]"
+              value="00-1341-1313-9241-9943"
+            />
 
-        <label>Ticket Number</label>
-        <input type="text" name="tickets[2][ticketNo]" value="19" />
+            <label>Ticket Number</label>
+            <input type="text" name="tickets[2][ticketNo]" value="19" />
 
-        <label>Date</label>
-        <input
-          type="text"
-          name="tickets[2][validDate]"
-          value="03 August 2025"
-        />
+            <label>Date</label>
+            <input
+              type="text"
+              name="tickets[2][validDate]"
+              value="03 August 2025"
+            />
 
-        <label>Time</label>
-        <input type="text" name="tickets[2][time]" value="10:30:00" />
+            <label>Time</label>
+            <input type="text" name="tickets[2][time]" value="10:30:00" />
 
-        <label>Amount (PHP)</label>
-        <input type="text" name="tickets[2][amount]" value="700.00" />
-      </fieldset>
+            <label>Amount (PHP)</label>
+            <input type="text" name="tickets[2][amount]" value="700.00" />
+          </fieldset>
 
-      <!-- Ticket 4 -->
-      <!-- <fieldset>
+          <!-- Ticket 4 -->
+          <!-- <fieldset>
         <legend>Ticket #4</legend>
         <label>Voucher Type</label>
         <input
@@ -205,8 +413,8 @@
         <input type="text" name="tickets[3][amount]" value="923.00" />
       </fieldset> -->
 
-      <!-- Ticket 5 -->
-      <!-- <fieldset>
+          <!-- Ticket 5 -->
+          <!-- <fieldset>
         <legend>Ticket #5</legend>
         <label>Voucher Type</label>
         <input
@@ -242,36 +450,320 @@
         <input type="text" name="tickets[4][amount]" value="1999.00" />
       </fieldset> -->
 
-      <button type="submit">🖨️ Print Both Tickets</button>
-    </form>
+          <div class="button-group">
+            <button type="submit" class="btn-primary">
+              <span id="printBtnText">🖨️ Queue Tickets</span>
+              <span
+                id="printBtnSpinner"
+                class="loading-spinner"
+                style="display: none"
+              ></span>
+            </button>
+            <button type="button" id="resumeBtn" class="btn-secondary">
+              ▶️ Resume Queue
+            </button>
+            <button type="button" id="clearFormBtn" class="btn-warning">
+              📝 Clear Form
+            </button>
+            <button type="button" id="clearQueueBtn" class="btn-warning">
+              🗑️ Clear Queue
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card status-section">
+        <div class="status-header">
+          <h3>Queue Status</h3>
+          <div class="status-indicator">
+            <div id="statusDot" class="status-dot status-online"></div>
+            <span id="statusText">Ready</span>
+          </div>
+        </div>
+
+        <div>
+          <strong>Queue Length:</strong> <span id="queueLength">0</span>
+        </div>
+
+        <div class="log-container" id="logContainer">
+          <div class="log-entry">
+            <div class="log-time">System ready</div>
+            <div class="log-message log-info">Waiting for jobs...</div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script>
+      // DOM Elements
       const form = document.getElementById("ticketForm");
+      const resumeBtn = document.getElementById("resumeBtn");
+      const clearFormBtn = document.getElementById("clearFormBtn");
+      const clearQueueBtn = document.getElementById("clearQueueBtn");
+      const printBtnText = document.getElementById("printBtnText");
+      const printBtnSpinner = document.getElementById("printBtnSpinner");
+      const statusDot = document.getElementById("statusDot");
+      const statusText = document.getElementById("statusText");
+      const queueLength = document.getElementById("queueLength");
+      const logContainer = document.getElementById("logContainer");
 
+      // State
+      let isPolling = false;
+      let pollInterval;
+
+      // Toast notification system
+      function showToast(message, type = "success") {
+        const existingToast = document.querySelector(".toast");
+        if (existingToast) existingToast.remove();
+
+        const toast = document.createElement("div");
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+
+        setTimeout(() => toast.classList.add("show"), 100);
+        setTimeout(() => {
+          toast.classList.remove("show");
+          setTimeout(() => toast.remove(), 300);
+        }, 3000);
+      }
+
+      // Update UI state
+      function updateUIState(isPrinting = false, hasError = false) {
+        const submitBtn = form.querySelector('button[type="submit"]');
+
+        if (isPrinting) {
+          submitBtn.disabled = true;
+          printBtnText.style.display = "none";
+          printBtnSpinner.style.display = "inline-block";
+          statusDot.className = "status-dot status-printing";
+          statusText.textContent = "Processing...";
+        } else if (hasError) {
+          submitBtn.disabled = false;
+          printBtnText.style.display = "inline";
+          printBtnSpinner.style.display = "none";
+          statusDot.className = "status-dot status-error";
+          statusText.textContent = "Error - Check logs";
+        } else {
+          submitBtn.disabled = false;
+          printBtnText.style.display = "inline";
+          printBtnSpinner.style.display = "none";
+          statusDot.className = "status-dot status-online";
+          statusText.textContent = "Ready";
+        }
+      }
+
+      // Format log message for display
+      function formatLogMessage(entry) {
+        const time = new Date(entry.time).toLocaleTimeString();
+        const message = entry.message;
+
+        let messageClass = "log-message";
+        if (message.includes("✅")) messageClass += " log-success";
+        else if (message.includes("❌")) messageClass += " log-error";
+        else if (message.includes("⚠️") || message.includes("⏸️"))
+          messageClass += " log-warning";
+        else if (message.includes("📝") || message.includes("🔌"))
+          messageClass += " log-info";
+
+        return `
+          <div class="log-entry">
+            <div class="log-time">${time}</div>
+            <div class="${messageClass}">${message}</div>
+          </div>
+        `;
+      }
+
+      // Fetch and display status
+      async function fetchStatus() {
+        try {
+          const response = await fetch("/status");
+          const data = await response.json();
+
+          if (data.success && data.log) {
+            // Update queue length
+            queueLength.textContent = data.queueLength || 0;
+
+            // Update logs
+            const logs = data.log.slice(-20); // Show last 20 logs
+            logContainer.innerHTML = logs.map(formatLogMessage).join("");
+            logContainer.scrollTop = logContainer.scrollHeight;
+
+            // Determine if there are any recent errors
+            const recentLogs = logs.slice(-5);
+            const hasRecentError = recentLogs.some(
+              (log) => log.message.includes("❌") || log.message.includes("⏸️")
+            );
+
+            // Use backend's isPrinting status for more accuracy
+            updateUIState(data.isPrinting || false, hasRecentError);
+          }
+        } catch (error) {
+          console.error("Failed to fetch status:", error);
+          updateUIState(false, true);
+        }
+      }
+
+      // Start/stop polling
+      function startPolling() {
+        if (!isPolling) {
+          isPolling = true;
+          fetchStatus(); // Initial fetch
+          pollInterval = setInterval(fetchStatus, 2000); // Poll every 2 seconds
+        }
+      }
+
+      function stopPolling() {
+        if (isPolling) {
+          isPolling = false;
+          clearInterval(pollInterval);
+        }
+      }
+
+      // Form submission handler
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const formData = new FormData(form);
+        updateUIState(true);
 
-        // Convert FormData into structured tickets array
-        const tickets = [];
-        for (const [key, value] of formData.entries()) {
-          const match = key.match(/tickets\[(\d+)\]\[(.+)\]/);
-          if (match) {
-            const index = parseInt(match[1], 10);
-            const field = match[2];
-            if (!tickets[index]) tickets[index] = {};
-            tickets[index][field] = value;
+        try {
+          const formData = new FormData(form);
+
+          // Convert FormData into structured tickets array
+          const tickets = [];
+          for (const [key, value] of formData.entries()) {
+            const match = key.match(/tickets\[(\d+)\]\[(.+)\]/);
+            if (match) {
+              const index = parseInt(match[1], 10);
+              const field = match[2];
+              if (!tickets[index]) tickets[index] = {};
+              tickets[index][field] = value;
+            }
+          }
+
+          // Filter out empty tickets
+          const validTickets = tickets.filter(
+            (ticket) => ticket && ticket.ticketNo && ticket.amount
+          );
+
+          if (validTickets.length === 0) {
+            showToast("Please fill in at least one ticket", "error");
+            updateUIState(false);
+            return;
+          }
+
+          const response = await fetch("/print", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tickets: validTickets }),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            showToast(result.message, "success");
+            // Optionally clear form after successful submission
+            // form.reset();
+          } else {
+            showToast(result.message || "Print request failed", "error");
+          }
+        } catch (error) {
+          console.error("Print request failed:", error);
+          showToast("Failed to send print request", "error");
+        } finally {
+          updateUIState(false);
+          fetchStatus(); // Immediately update status
+        }
+      });
+
+      // Resume queue handler
+      resumeBtn.addEventListener("click", async () => {
+        try {
+          resumeBtn.disabled = true;
+          resumeBtn.innerHTML =
+            '<span class="loading-spinner"></span> Resuming...';
+
+          const response = await fetch("/resume", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            showToast("Queue resumed successfully", "success");
+          } else {
+            showToast("Failed to resume queue", "error");
+          }
+        } catch (error) {
+          console.error("Resume request failed:", error);
+          showToast("Failed to resume queue", "error");
+        } finally {
+          resumeBtn.disabled = false;
+          resumeBtn.innerHTML = "▶️ Resume Queue";
+          fetchStatus(); // Update status
+        }
+      });
+
+      // Clear form handler
+      clearFormBtn.addEventListener("click", () => {
+        if (confirm("Are you sure you want to clear all form data?")) {
+          form.reset();
+          showToast("Form cleared", "warning");
+        }
+      });
+
+      // Clear queue handler
+      clearQueueBtn.addEventListener("click", async () => {
+        if (
+          confirm(
+            "Are you sure you want to clear the entire print queue? This will delete all pending jobs."
+          )
+        ) {
+          try {
+            clearQueueBtn.disabled = true;
+            clearQueueBtn.innerHTML =
+              '<span class="loading-spinner"></span> Clearing...';
+
+            const response = await fetch("/clear-queue", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+              showToast(result.message, "success");
+            } else {
+              showToast(result.message || "Failed to clear queue", "error");
+            }
+          } catch (error) {
+            console.error("Clear queue request failed:", error);
+            showToast("Failed to clear queue", "error");
+          } finally {
+            clearQueueBtn.disabled = false;
+            clearQueueBtn.innerHTML = "🗑️ Clear Queue";
+            fetchStatus(); // Update status immediately
           }
         }
+      });
 
-        const res = await fetch("/print", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tickets }),
-        });
+      // Page visibility change handler (pause polling when tab is hidden)
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          stopPolling();
+        } else {
+          startPolling();
+        }
+      });
 
-        const result = await res.json();
-        alert(result.message);
+      // Initialize polling when page loads
+      document.addEventListener("DOMContentLoaded", () => {
+        startPolling();
+      });
+
+      // Cleanup on page unload
+      window.addEventListener("beforeunload", () => {
+        stopPolling();
       });
     </script>
   </body>

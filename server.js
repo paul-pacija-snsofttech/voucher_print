@@ -2,6 +2,14 @@ import express from "express";
 import { join } from "path";
 import { SerialPort } from "serialport";
 import { PRINTER_CMDS } from "./printerConstants.js";
+import Redis from "ioredis";
+import {
+  enqueueJob,
+  dequeueJob,
+  queueLength,
+  requeueJob,
+  clearQueue,
+} from "./redis.js";
 
 const app = express();
 const PORT = 3000;
@@ -15,6 +23,7 @@ let printerPort;
 // Epic Edge Vendor & Product IDs
 const VENDOR_ID = "0613"; // hex but as string
 const PRODUCT_ID = "0960";
+const redis = new Redis();
 
 /**
  * Finds the path to the Epic Edge printer
@@ -68,6 +77,7 @@ async function connectEpicEdge() {
     return printerPort;
   } catch (err) {
     console.error(err.message);
+    return;
   }
 }
 
@@ -215,7 +225,7 @@ function buildTicket({
   const barcode = Buffer.concat([
     Buffer.from([0x1d, 0x68, 210]),
     Buffer.from([0x1d, 0x77, 6]),
-    Buffer.from([0x1d, 0x6b, 0x09, cleanValidation.length]),
+    Buffer.from([0x1d, 0x6b, 0x07, cleanValidation.length]),
     Buffer.from(cleanValidation, "ascii"),
   ]);
 
@@ -241,9 +251,15 @@ function buildTicket({
         Buffer.from(`${safeVoucherType}\n`, "ascii"),
 
         // BARCODE
+        // Buffer.from(PRINTER_CMDS.ORIENTATION(0)),
+        // Buffer.from(PRINTER_CMDS.PRINT_DIRECTION(1)),
+        // Buffer.from(PRINTER_CMDS.ALIGN.CENTER),
         barcode,
 
         // VALIDATION
+        // Buffer.from(PRINTER_CMDS.ORIENTATION(1)),
+        // Buffer.from(PRINTER_CMDS.PRINT_DIRECTION(1)),
+        // Buffer.from(PRINTER_CMDS.ALIGN.CENTER),
         Buffer.from(PRINTER_CMDS.TITLE(10, 1, 1)),
         Buffer.from(`VALIDATION ${safeValidation}\n`, "ascii"),
 
@@ -304,90 +320,134 @@ function buildTicket({
  * Print queue
  * @returns {Promise<void>}
  */
-const printQueue = [];
 let isPrinting = false;
+
 async function processQueue() {
-  if (isPrinting || !printQueue.length || !printerPort?.isOpen) return;
+  if (isPrinting || !printerPort?.isOpen) return;
+
+  const job = await dequeueJob();
+  if (!job) return; // nothing to do
 
   isPrinting = true;
-  const job = printQueue.shift();
 
   try {
-    // ✅ Check printer status BEFORE sending data
+    // ✅ Check printer status BEFORE building/sending ticket
     const status = await sendStatusRequest();
     if (!status.printerReady || status.errors.length > 0) {
       throw new Error(`Printer not ready: ${status.errors.join(", ")}`);
     }
 
-    // ✅ Only send data if printer is ready
-    printerPort.write(job.data, async (err) => {
-      if (err) {
-        addLog(`❌ Failed to print Ticket#${job.ticketNo}: ${err.message}`);
-        printQueue.unshift(job); // put job back at front of queue
+    // ✅ Build ticket data from job object
+    const ticketData = buildTicket(job);
+    if (!ticketData) {
+      throw new Error("Failed to build ticket data");
+    }
+
+    // ✅ Send ticket data to printer (single write operation)
+    printerPort.write(ticketData, async (writeErr) => {
+      if (writeErr) {
+        addLog(`❌ Failed to send Ticket#${job.ticketNo}: ${writeErr.message}`);
+        const requeued = await requeueJob(job);
+        if (requeued) {
+          addLog(`🔄 Ticket#${job.ticketNo} requeued for retry`);
+        }
         isPrinting = false;
-        setTimeout(processQueue, 3000); // retry later
-        return;
+        return setTimeout(processQueue, 3000);
       }
 
-      try {
-        const { ready } = await waitUntilPrinterDone(); // wait for completion
-        if (ready) {
-          isPrinting = false;
-          addLog(`✅ Ticket#${job.ticketNo} printed successfully`);
-          if (printQueue.length > 0) {
-            processQueue(); // move on immediately
-          }
-        }
-      } catch (statusErr) {
-        addLog(
-          `❌ Ticket#${job.ticketNo} failed during printing: ${statusErr.message}`
-        );
-        printQueue.unshift(job); // put job back at front of queue
+      // ✅ Wait for printer to complete the job - MUST wait for barcode completion
+      addLog(`⏳ Waiting for Ticket#${job.ticketNo} to complete processing...`);
+      const { ready } = await waitUntilPrinterDone();
+      if (ready) {
+        addLog(`✅ Ticket#${job.ticketNo} printed successfully`);
         isPrinting = false;
-        setTimeout(processQueue, 5000); // retry later with longer delay
+        // Only process next queue item after current job is 100% complete
+        setTimeout(() => processQueue(), 1000); // Small delay before next job
       }
     });
   } catch (preCheckErr) {
+    if (preCheckErr.message.includes("Paper jam")) {
+      addLog(`⚠️ Ticket#${job.ticketNo - 1} delayed: ${preCheckErr.message}`);
+    } else {
+      addLog(`⚠️ Ticket#${job.ticketNo} delayed: ${preCheckErr.message}`);
+    }
     // ✅ Printer not ready - requeue without sending data
-    addLog(`⚠️ Ticket#${job.ticketNo} delayed: ${preCheckErr.message}`);
-    printQueue.unshift(job); // put job back at front of queue
+    const requeued = await redis.lpush("printQueue", JSON.stringify(job));
+    if (requeued) {
+      addLog(`🔄 Ticket#${job.ticketNo} requeued - printer not ready`);
+    }
     isPrinting = false;
-    setTimeout(processQueue, 5000); // retry later
+    return;
   }
 }
 
 /**
- * Waits until the printer is done
+ * Waits until the printer is done (waiting for 7 seconds between checks)
  * @param {number} maxAttempts
  * @param {number} interval
  * @returns {Promise<{ready: boolean}>} The status of the printer
  */
-async function waitUntilPrinterDone(maxAttempts = 60, interval = 1000) {
+async function waitUntilPrinterDone(maxAttempts = 60, interval = 7000) {
   let sawTicket = false;
 
   for (let i = 0; i < maxAttempts; i++) {
     const status = await sendStatusRequest();
 
-    // Step 1: wait until ticket enters path
-    if (status.barcodeCompleted) {
-      sawTicket = true;
+    // Log current status for troubleshooting
+    if (i === 0 || i % 5 === 0) {
+      // Log every 5th attempt to avoid spam
+      addLog(
+        `⏳ Waiting for completion... (attempt ${
+          i + 1
+        }/${maxAttempts}) - BarcodeComplete: ${
+          status.barcodeCompleted
+        }, PrinterReady: ${status.printerReady}`
+      );
     }
 
-    // Step 2: once ticket entered → wait until it leaves
-    if (sawTicket && status.printerReady) {
-      sawTicket = false;
+    // Step 1: MUST wait for barcode completion before proceeding
+    if (status.barcodeCompleted) {
+      sawTicket = true;
+      addLog("🎯 Barcode processing completed");
+    }
+
+    // Step 2: Once barcode is completed, job is DONE regardless of temporary printer status
+    if (sawTicket) {
+      addLog("✅ Print job fully completed - barcode processed successfully");
       return { ready: true };
     }
 
-    // If fatal error
+    // Only check for fatal errors if we haven't seen barcode completion yet
     if (status.errors.length) {
-      throw new Error(status.errors.join(", "));
+      // Only throw error for truly blocking hardware issues
+      const blockingErrors = status.errors.filter(
+        (error) =>
+          error.includes("Paper jam") ||
+          error.includes("Chassis open") ||
+          error.includes("Head is up")
+      );
+
+      if (blockingErrors.length > 0) {
+        throw new Error(blockingErrors.join(", "));
+      }
+
+      // Ignore "No ticket" and "Not Ready" errors while waiting - these are normal
     }
 
     await new Promise((r) => setTimeout(r, interval));
   }
 
-  throw new Error("Timeout waiting for printer to finish");
+  throw new Error(
+    `Timeout: Barcode never completed after ${
+      (maxAttempts * interval) / 1000
+    } seconds`
+  );
+}
+
+async function resumeQueue() {
+  if (!isPrinting && (await queueLength()) > 0) {
+    processQueue();
+  }
 }
 
 /**
@@ -399,6 +459,7 @@ async function sendStatusRequest() {
     barcodeCompleted: false,
     printerReady: false,
     errors: [],
+    hasTicket: false,
   };
 
   // --- GS z ---
@@ -408,7 +469,7 @@ async function sendStatusRequest() {
       const s = data[0];
 
       if (s & PRINTER_CMDS.GS_Z_ERRORS.TICKET_IN_PRINTER) {
-        addLog("✅ Ticket in printer");
+        status.hasTicket = true;
       } else {
         status.errors.push("❌ No ticket in printer");
       }
@@ -437,7 +498,6 @@ async function sendStatusRequest() {
 
       if (s & PRINTER_CMDS.GS_S_ERRORS.PRINTER_READY) {
         status.printerReady = true;
-        addLog("✅ Printer Ready");
       } else {
         status.errors.push("⏳ Printer Not Ready");
       }
@@ -456,9 +516,11 @@ async function sendStatusRequest() {
     });
   });
 
-  if (status.errors.length && !status.printerReady) {
-    throw new Error(status.errors.join(", "));
+  // ✅ Only log once when both printer is ready AND has ticket
+  if (status.printerReady && status.hasTicket && status.errors.length === 0) {
+    addLog("✅ Printer ready with ticket loaded");
   }
+
   return status;
 }
 
@@ -468,12 +530,14 @@ async function sendStatusRequest() {
  * @returns {void}
  */
 const statusLog = [];
-function addLog(message) {
+export function addLog(message) {
   const entry = { time: new Date().toISOString(), message };
   statusLog.push(entry);
 
-  // Keep logs
-  statusLog.shift();
+  // Keep only last 100 logs
+  if (statusLog.length > 100) {
+    statusLog.shift();
+  }
 
   console.log(message); // still log to terminal
 }
@@ -502,9 +566,7 @@ app.post("/print", async (req, res) => {
   try {
     for (const ticket of tickets) {
       const newTicket = { ...ticket, template: "A" };
-      const data = buildTicket(newTicket);
-
-      printQueue.push({ data, ticketNo: ticket.ticketNo });
+      await enqueueJob(newTicket);
       addLog(`📝 Ticket#${ticket.ticketNo} queued`);
     }
 
@@ -524,17 +586,63 @@ app.post("/print", async (req, res) => {
   }
 });
 
+app.post("/resume", async (req, res) => {
+  try {
+    await resumeQueue();
+    const length = await queueLength();
+    return res.json({
+      success: true,
+      message: `Queue resumed - ${length} jobs pending`,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to resume queue",
+      details: error.message,
+    });
+  }
+});
+
+app.post("/clear-queue", async (req, res) => {
+  try {
+    await clearQueue();
+    addLog("🗑️ Print queue cleared by user");
+    return res.json({
+      success: true,
+      message: "Print queue cleared successfully",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to clear queue",
+      details: error.message,
+    });
+  }
+});
+
 /**
  * Gets the status log
  * @param {Request} req
  * @param {Response} res
  * @returns {Promise<Response>} The response
  */
-app.get("/status", (req, res) => {
-  res.json({
-    success: true,
-    log: statusLog,
-  });
+app.get("/status", async (req, res) => {
+  try {
+    const length = await queueLength();
+    res.json({
+      success: true,
+      log: statusLog,
+      queueLength: length,
+      isPrinting: isPrinting,
+    });
+  } catch (error) {
+    res.json({
+      success: true,
+      log: statusLog,
+      queueLength: 0,
+      isPrinting: isPrinting,
+    });
+  }
 });
 
 /**
@@ -544,7 +652,7 @@ app.get("/status", (req, res) => {
  * @returns {Promise<Response>} The response
  */
 app.get("/", (req, res) => {
-  res.sendFile(join(__dirname, "public/index.html"));
+  res.sendFile(join(import.meta.dirname, "public/index.html"));
 });
 
 /**

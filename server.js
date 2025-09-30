@@ -387,7 +387,7 @@ async function processQueue() {
  * @param {number} interval
  * @returns {Promise<{ready: boolean}>} The status of the printer
  */
-async function waitUntilPrinterDone(maxAttempts = 60, interval = 7000) {
+async function waitUntilPrinterDone(maxAttempts = 6, interval = 7000) {
   let sawTicket = false;
 
   for (let i = 0; i < maxAttempts; i++) {
